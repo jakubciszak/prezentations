@@ -6,10 +6,8 @@ namespace Features\Bootstrap;
 
 use App\Onboarding\Model\Status;
 use Behat\Behat\Context\Context;
+use Behat\Step\Then;
 
-/**
- * Context for stage progression and document collection assertions.
- */
 final class DocumentContext implements Context
 {
     private SharedOnboardingState $state;
@@ -19,9 +17,7 @@ final class DocumentContext implements Context
         $this->state = SharedOnboardingState::getInstance();
     }
 
-    /**
-     * @Then all stages should be completed
-     */
+    #[Then('all stages should be completed')]
     public function allStagesShouldBeCompleted(): void
     {
         $case = $this->state->currentCase;
@@ -35,9 +31,7 @@ final class DocumentContext implements Context
         });
     }
 
-    /**
-     * @Then the stage :stageName should be completed
-     */
+    #[Then('the stage :stageName should be completed')]
     public function theStageShouldBeCompleted(string $stageName): void
     {
         $found = false;
@@ -54,9 +48,7 @@ final class DocumentContext implements Context
         assert($found, "Stage '{$stageName}' not found");
     }
 
-    /**
-     * @Then the stage :stageName should not be completed
-     */
+    #[Then('the stage :stageName should not be completed')]
     public function theStageShouldNotBeCompleted(string $stageName): void
     {
         $this->state->currentCase->stages()->forEach(function ($stage) use ($stageName) {

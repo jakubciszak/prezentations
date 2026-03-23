@@ -43,7 +43,7 @@ final class StepStateTest extends TestCase
 
     private function thenStatusIs(StepState $state, Status $expected): void
     {
-        self::assertSame($expected, $state->status());
+        self::assertSame($expected, $state->status);
     }
 
     private function thenTransitionIsRejected(StepState $state, callable $action): void
@@ -67,9 +67,9 @@ final class StepStateTest extends TestCase
     {
         $state = $this->givenInitializedState();
 
-        self::assertNull($state->outcome());
-        self::assertNull($state->startedAt());
-        self::assertNull($state->completedAt());
+        self::assertNull($state->outcome);
+        self::assertNull($state->startedAt);
+        self::assertNull($state->completedAt);
     }
 
     #[Test]
@@ -106,9 +106,9 @@ final class StepStateTest extends TestCase
     {
         $state = $this->givenPendingState();
 
-        self::assertNotNull($state->startedAt());
-        self::assertNull($state->completedAt());
-        self::assertNull($state->outcome());
+        self::assertNotNull($state->startedAt);
+        self::assertNull($state->completedAt);
+        self::assertNull($state->outcome);
     }
 
     #[Test]
@@ -121,9 +121,9 @@ final class StepStateTest extends TestCase
 
         self::assertInstanceOf(CompletedState::class, $completed);
         $this->thenStatusIs($completed, Status::Completed);
-        self::assertSame($outcome, $completed->outcome());
-        self::assertNotNull($completed->startedAt());
-        self::assertNotNull($completed->completedAt());
+        self::assertSame($outcome, $completed->outcome);
+        self::assertNotNull($completed->startedAt);
+        self::assertNotNull($completed->completedAt);
     }
 
     #[Test]
@@ -136,7 +136,7 @@ final class StepStateTest extends TestCase
 
         self::assertInstanceOf(FailedState::class, $failed);
         $this->thenStatusIs($failed, Status::Failed);
-        self::assertSame($outcome, $failed->outcome());
+        self::assertSame($outcome, $failed->outcome);
     }
 
     #[Test]
@@ -153,12 +153,12 @@ final class StepStateTest extends TestCase
     public function completed_preserves_timestamps_from_pending(): void
     {
         $pending = $this->givenPendingState();
-        $startedAt = $pending->startedAt();
+        $startedAt = $pending->startedAt;
 
         $completed = $pending->complete(OutcomeFactory::approved());
 
-        self::assertEquals($startedAt, $completed->startedAt());
-        self::assertGreaterThanOrEqual($startedAt, $completed->completedAt());
+        self::assertEquals($startedAt, $completed->startedAt);
+        self::assertGreaterThanOrEqual($startedAt, $completed->completedAt);
     }
 
     #[Test]
@@ -193,7 +193,7 @@ final class StepStateTest extends TestCase
         $state = $this->givenFailedState();
 
         $this->thenStatusIs($state, Status::Failed);
-        self::assertSame('timeout', $state->outcome()->value);
+        self::assertSame('timeout', $state->outcome->value);
     }
 
     #[Test]
@@ -230,15 +230,15 @@ final class StepStateTest extends TestCase
 
         $state = $state->markPending();
         $this->thenStatusIs($state, Status::Pending);
-        self::assertNotNull($state->startedAt());
+        self::assertNotNull($state->startedAt);
 
         $outcome = OutcomeFactory::approved(['risk_score' => 20]);
         $state = $state->complete($outcome);
 
         $this->thenStatusIs($state, Status::Completed);
-        self::assertSame('approved', $state->outcome()->value);
-        self::assertSame(20, $state->outcome()->metadata['risk_score']);
-        self::assertNotNull($state->completedAt());
+        self::assertSame('approved', $state->outcome->value);
+        self::assertSame(20, $state->outcome->metadata['risk_score']);
+        self::assertNotNull($state->completedAt);
     }
 
     #[Test]
@@ -251,7 +251,7 @@ final class StepStateTest extends TestCase
         $state = $state->fail($outcome);
 
         $this->thenStatusIs($state, Status::Failed);
-        self::assertSame('service_error', $state->outcome()->value);
-        self::assertSame(500, $state->outcome()->metadata['code']);
+        self::assertSame('service_error', $state->outcome->value);
+        self::assertSame(500, $state->outcome->metadata['code']);
     }
 }

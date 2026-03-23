@@ -8,15 +8,19 @@ use App\Onboarding\Model\Outcome;
 use App\Onboarding\Model\Status;
 use DateTimeImmutable;
 
-/**
- * Initial state - step has been created but not yet dispatched.
- * Only transition allowed: markPending()
- */
 final readonly class InitializedState implements StepState
 {
-    public function status(): Status
+    public Status $status;
+    public ?Outcome $outcome;
+    public ?DateTimeImmutable $startedAt;
+    public ?DateTimeImmutable $completedAt;
+
+    public function __construct()
     {
-        return Status::Initialized;
+        $this->status = Status::Initialized;
+        $this->outcome = null;
+        $this->startedAt = null;
+        $this->completedAt = null;
     }
 
     public function markPending(): StepState
@@ -26,26 +30,11 @@ final readonly class InitializedState implements StepState
 
     public function complete(Outcome $outcome): StepState
     {
-        throw IllegalStateTransitionException::create($this->status(), 'complete');
+        throw IllegalStateTransitionException::create($this->status, 'complete');
     }
 
     public function fail(Outcome $outcome): StepState
     {
-        throw IllegalStateTransitionException::create($this->status(), 'fail');
-    }
-
-    public function outcome(): ?Outcome
-    {
-        return null;
-    }
-
-    public function startedAt(): ?DateTimeImmutable
-    {
-        return null;
-    }
-
-    public function completedAt(): ?DateTimeImmutable
-    {
-        return null;
+        throw IllegalStateTransitionException::create($this->status, 'fail');
     }
 }

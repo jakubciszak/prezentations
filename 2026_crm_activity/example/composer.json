@@ -3,7 +3,7 @@
     "description": "CRM Activity archetype - Business Onboarding example",
     "type": "project",
     "require": {
-        "php": ">=8.2",
+        "php": ">=8.4",
         "symfony/yaml": "^7.0",
         "symfony/messenger": "^7.0",
         "symfony/event-dispatcher": "^7.0",

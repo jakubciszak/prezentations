@@ -10,11 +10,11 @@ use App\Onboarding\Handler\CaseEventLogger;
 use Behat\Behat\Context\Context;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
 use Behat\Gherkin\Node\TableNode;
-use Webmozart\Assert\Assert;
+use Behat\Hook\BeforeScenario;
+use Behat\Step\Given;
+use Behat\Step\Then;
+use Behat\Step\When;
 
-/**
- * Main onboarding context - handles case creation and outcome assertions.
- */
 final class OnboardingContext implements Context
 {
     private SharedOnboardingState $state;
@@ -25,16 +25,14 @@ final class OnboardingContext implements Context
         $this->state = SharedOnboardingState::getInstance();
     }
 
-    /** @BeforeScenario */
+    #[BeforeScenario]
     public function resetState(BeforeScenarioScope $scope): void
     {
         SharedOnboardingState::reset();
         $this->state = SharedOnboardingState::getInstance();
     }
 
-    /**
-     * @Given the :clientType onboarding template is loaded
-     */
+    #[Given('the :clientType onboarding template is loaded')]
     public function theOnboardingTemplateIsLoaded(string $clientType): void
     {
         $this->clientType = $clientType;
@@ -47,9 +45,7 @@ final class OnboardingContext implements Context
         $this->state->eventLogger = $container->get(CaseEventLogger::class);
     }
 
-    /**
-     * @Given a client :companyName with NIP :nip
-     */
+    #[Given('a client :companyName with NIP :nip')]
     public function aClientWithNip(string $companyName, string $nip): void
     {
         $this->state->clientData = [
@@ -59,25 +55,19 @@ final class OnboardingContext implements Context
         ];
     }
 
-    /**
-     * @Given the client has annual revenue of :revenue PLN
-     */
+    #[Given('the client has annual revenue of :revenue PLN')]
     public function theClientHasAnnualRevenueOf(int $revenue): void
     {
         $this->state->clientData['annual_revenue'] = $revenue;
     }
 
-    /**
-     * @Given the client has partner referral code :code
-     */
+    #[Given('the client has partner referral code :code')]
     public function theClientHasPartnerReferralCode(string $code): void
     {
         $this->state->clientData['partner_referral_code'] = $code;
     }
 
-    /**
-     * @When the onboarding case is started
-     */
+    #[When('the onboarding case is started')]
     public function theOnboardingCaseIsStarted(): void
     {
         $this->state->currentCase = $this->state->engine->startCase(
@@ -85,13 +75,10 @@ final class OnboardingContext implements Context
             $this->state->clientData,
         );
 
-        // Parse event log to extract step data
         $this->parseEventLog();
     }
 
-    /**
-     * @Then the case should be completed with outcome :outcome
-     */
+    #[Then('the case should be completed with outcome :outcome')]
     public function theCaseShouldBeCompletedWithOutcome(string $outcome): void
     {
         $case = $this->state->currentCase;
@@ -100,9 +87,7 @@ final class OnboardingContext implements Context
         assert($case->caseOutcome()?->value === $outcome, "Case outcome is '{$case->caseOutcome()?->value}', expected '{$outcome}'");
     }
 
-    /**
-     * @Then the following steps should have been executed in order:
-     */
+    #[Then('the following steps should have been executed in order:')]
     public function theFollowingStepsShouldHaveBeenExecutedInOrder(TableNode $table): void
     {
         $expected = array_column($table->getHash(), 'step');
@@ -115,9 +100,7 @@ final class OnboardingContext implements Context
         ));
     }
 
-    /**
-     * @Then the step :stepId should have been executed
-     */
+    #[Then('the step :stepId should have been executed')]
     public function theStepShouldHaveBeenExecuted(string $stepId): void
     {
         assert(
@@ -126,9 +109,7 @@ final class OnboardingContext implements Context
         );
     }
 
-    /**
-     * @Then the step :stepId should not have been executed
-     */
+    #[Then('the step :stepId should not have been executed')]
     public function theStepShouldNotHaveBeenExecuted(string $stepId): void
     {
         assert(

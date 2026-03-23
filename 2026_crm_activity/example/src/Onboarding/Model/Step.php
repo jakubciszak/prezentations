@@ -8,17 +8,6 @@ use App\Onboarding\Model\State\InitializedState;
 use App\Onboarding\Model\State\StepState;
 use DateTimeImmutable;
 
-/**
- * Activity - the individual action within a Stage.
- *
- * Uses the State pattern to manage lifecycle transitions.
- * Each state object enforces which transitions are valid
- * and carries the data relevant to that phase.
- *
- * Transitions:
- *   Initialized → Pending → Completed
- *                         → Failed
- */
 final class Step
 {
     private StepState $state;
@@ -48,21 +37,21 @@ final class Step
 
     public function status(): Status
     {
-        return $this->state->status();
+        return $this->state->status;
     }
 
     public function outcome(): ?Outcome
     {
-        return $this->state->outcome();
+        return $this->state->outcome;
     }
 
     public function startedAt(): ?DateTimeImmutable
     {
-        return $this->state->startedAt();
+        return $this->state->startedAt;
     }
 
     public function completedAt(): ?DateTimeImmutable
     {
-        return $this->state->completedAt();
+        return $this->state->completedAt;
     }
 }

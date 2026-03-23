@@ -5,10 +5,8 @@ declare(strict_types=1);
 namespace Features\Bootstrap;
 
 use Behat\Behat\Context\Context;
+use Behat\Step\Then;
 
-/**
- * Context for event log and audit trail assertions.
- */
 final class EventContext implements Context
 {
     private SharedOnboardingState $state;
@@ -18,9 +16,7 @@ final class EventContext implements Context
         $this->state = SharedOnboardingState::getInstance();
     }
 
-    /**
-     * @Then the event log should contain :fragment
-     */
+    #[Then('the event log should contain :fragment')]
     public function theEventLogShouldContain(string $fragment): void
     {
         $found = false;

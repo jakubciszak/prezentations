@@ -18,14 +18,4 @@ final readonly class CaseStarted implements CaseEvent
     ) {
         $this->occurredAt = new DateTimeImmutable();
     }
-
-    public function caseId(): string
-    {
-        return $this->caseId;
-    }
-
-    public function occurredAt(): DateTimeImmutable
-    {
-        return $this->occurredAt;
-    }
 }

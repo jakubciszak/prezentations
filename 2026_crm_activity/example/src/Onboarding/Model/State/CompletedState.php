@@ -8,50 +8,30 @@ use App\Onboarding\Model\Outcome;
 use App\Onboarding\Model\Status;
 use DateTimeImmutable;
 
-/**
- * Completed state - step finished with a positive outcome.
- * Terminal state - no further transitions allowed.
- */
 final readonly class CompletedState implements StepState
 {
-    public function __construct(
-        private DateTimeImmutable $startedAt,
-        private DateTimeImmutable $completedAt,
-        private Outcome $outcome,
-    ) {}
+    public Status $status;
 
-    public function status(): Status
-    {
-        return Status::Completed;
+    public function __construct(
+        public DateTimeImmutable $startedAt,
+        public DateTimeImmutable $completedAt,
+        public Outcome $outcome,
+    ) {
+        $this->status = Status::Completed;
     }
 
     public function markPending(): StepState
     {
-        throw IllegalStateTransitionException::create($this->status(), 'markPending');
+        throw IllegalStateTransitionException::create($this->status, 'markPending');
     }
 
     public function complete(Outcome $outcome): StepState
     {
-        throw IllegalStateTransitionException::create($this->status(), 'complete');
+        throw IllegalStateTransitionException::create($this->status, 'complete');
     }
 
     public function fail(Outcome $outcome): StepState
     {
-        throw IllegalStateTransitionException::create($this->status(), 'fail');
-    }
-
-    public function outcome(): Outcome
-    {
-        return $this->outcome;
-    }
-
-    public function startedAt(): DateTimeImmutable
-    {
-        return $this->startedAt;
-    }
-
-    public function completedAt(): DateTimeImmutable
-    {
-        return $this->completedAt;
+        throw IllegalStateTransitionException::create($this->status, 'fail');
     }
 }

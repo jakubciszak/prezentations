@@ -8,6 +8,6 @@ use DateTimeImmutable;
 
 interface CaseEvent
 {
-    public function caseId(): string;
-    public function occurredAt(): DateTimeImmutable;
+    public string $caseId { get; }
+    public DateTimeImmutable $occurredAt { get; }
 }
