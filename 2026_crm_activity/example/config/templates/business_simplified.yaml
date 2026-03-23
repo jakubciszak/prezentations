@@ -1,0 +1,69 @@
+name: "Simplified Business Onboarding"
+version: 1
+client_type: business_simplified
+description: "Shortened onboarding for pre-verified partners and low-risk businesses"
+
+stages:
+  - id: prospect_intake
+    name: "Prospect Intake"
+    steps:
+      - id: collect_prospect_data
+        name: "Collect Prospect Data"
+        service: prospect_form
+        action: collect
+        required_metadata:
+          - company_name
+          - nip
+          - contact_email
+          - partner_referral_code
+        outcomes:
+          completed:
+            next_step: quick_risk_check
+          abandoned:
+            terminal: true
+            case_outcome: abandoned
+
+  - id: verification
+    name: "Quick Verification"
+    steps:
+      - id: quick_risk_check
+        name: "Automated Risk Check"
+        service: risk_calculation
+        action: quick_check
+        outcomes:
+          passed:
+            next_step: collect_minimal_documents
+          failed:
+            terminal: true
+            case_outcome: rejected
+
+  - id: document_collection
+    name: "Minimal Document Collection"
+    steps:
+      - id: collect_minimal_documents
+        name: "Collect Minimal Documents"
+        service: documents
+        action: request_basic
+        required_documents:
+          - id_scan
+        outcomes:
+          all_received:
+            next_step: auto_approve
+          expired:
+            terminal: true
+            case_outcome: expired
+
+  - id: finalization
+    name: "Auto Finalization"
+    steps:
+      - id: auto_approve
+        name: "Automatic Approval"
+        service: risk_calculation
+        action: auto_approve
+        outcomes:
+          approved:
+            terminal: true
+            case_outcome: approved
+          needs_manual:
+            terminal: true
+            case_outcome: requires_manual_review
