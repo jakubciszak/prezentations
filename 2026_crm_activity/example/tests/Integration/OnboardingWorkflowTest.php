@@ -14,17 +14,18 @@ use App\Infrastructure\YamlTemplateLoader;
 use App\Onboarding\Engine\OnboardingEngine;
 use App\Onboarding\Event\ActionFinished;
 use App\Onboarding\Event\ActionInitialized;
-use App\Onboarding\Event\ActionPending;
 use App\Onboarding\Event\CaseEvent;
 use App\Onboarding\Event\CaseFinished;
 use App\Onboarding\Event\CaseStarted;
 use App\Onboarding\Handler\ExternalServiceResponseHandler;
 use App\Onboarding\Model\CaseOutcome;
+use App\Onboarding\Model\OnboardingCase;
 use App\Onboarding\Model\Status;
 use Munus\Collection\Stream;
 use Symfony\Component\Messenger\Handler\HandlersLocator;
 use Symfony\Component\Messenger\MessageBus;
 use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
+use Tests\Factory\ClientDataFactory;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -51,7 +52,7 @@ final class OnboardingWorkflowTest extends TestCase
             new HandleMessageMiddleware(new HandlersLocator([
                 CaseStarted::class => [fn($e) => $this->recordedEvents[] = $e],
                 ActionInitialized::class => [fn($e) => $this->recordedEvents[] = $e],
-                ActionPending::class => [fn($e) => $this->recordedEvents[] = $e],
+                \App\Onboarding\Event\ActionPending::class => [fn($e) => $this->recordedEvents[] = $e],
                 ActionFinished::class => [fn($e) => $this->recordedEvents[] = $e],
                 CaseFinished::class => [fn($e) => $this->recordedEvents[] = $e],
                 ExternalServiceResponse::class => [
@@ -73,35 +74,106 @@ final class OnboardingWorkflowTest extends TestCase
         $this->engine = $engine;
     }
 
+    // --- given ---
+
+    private function givenLowRiskStandardCase(): OnboardingCase
+    {
+        return $this->engine->startCase('business_standard', ClientDataFactory::lowRiskClient());
+    }
+
+    private function givenMediumRiskStandardCase(): OnboardingCase
+    {
+        return $this->engine->startCase('business_standard', ClientDataFactory::mediumRiskClient());
+    }
+
+    private function givenFlaggedNipCase(): OnboardingCase
+    {
+        return $this->engine->startCase('business_standard', ClientDataFactory::flaggedNipClient());
+    }
+
+    private function givenUnknownNipCase(): OnboardingCase
+    {
+        return $this->engine->startCase('business_standard', ClientDataFactory::unknownNipClient());
+    }
+
+    private function givenSimplifiedPartnerCase(): OnboardingCase
+    {
+        return $this->engine->startCase('business_simplified', ClientDataFactory::simplifiedPartner());
+    }
+
+    // --- then: case status ---
+
+    private function thenCaseIsCompletedWith(OnboardingCase $case, CaseOutcome $expectedOutcome): void
+    {
+        self::assertSame(Status::Completed, $case->status());
+        self::assertSame($expectedOutcome, $case->caseOutcome());
+    }
+
+    // --- then: events ---
+
+    /**
+     * @return string[]
+     */
+    private function thenStepsInitializedInOrder(): array
+    {
+        return Stream::ofAll($this->recordedEvents)
+            ->filter(fn($e) => $e instanceof ActionInitialized)
+            ->map(fn(ActionInitialized $e) => $e->stepId)
+            ->toArray();
+    }
+
+    private function thenEventFlowStartsAndFinishes(OnboardingCase $case): void
+    {
+        $eventTypes = Stream::ofAll($this->recordedEvents)
+            ->map(fn(CaseEvent $e) => $e::class)
+            ->toArray();
+
+        self::assertSame(CaseStarted::class, $eventTypes[0]);
+        self::assertSame(CaseFinished::class, end($eventTypes));
+    }
+
+    private function thenAllEventsHaveCaseId(OnboardingCase $case): void
+    {
+        foreach ($this->recordedEvents as $event) {
+            self::assertSame($case->id->value, $event->caseId());
+            self::assertNotNull($event->occurredAt());
+        }
+    }
+
+    private function thenTerminalEventHasOutcome(string $expectedOutcome): void
+    {
+        $terminalFinished = Stream::ofAll($this->recordedEvents)
+            ->find(fn($e) => $e instanceof ActionFinished && $e->isTerminal);
+
+        self::assertTrue($terminalFinished->isPresent());
+        self::assertSame($expectedOutcome, $terminalFinished->get()->caseOutcome);
+    }
+
+    // --- then: stages ---
+
+    /**
+     * @return array<string, Status>
+     */
+    private function thenAllStagesAreCompleted(OnboardingCase $case): void
+    {
+        $case->stages()->forEach(function ($stage) {
+            self::assertSame(
+                Status::Completed,
+                $stage->status(),
+                "Stage '{$stage->name}' should be completed but is {$stage->status()->value}",
+            );
+        });
+    }
+
     // --- Standard onboarding: Happy path (low risk) ---
 
     #[Test]
     public function low_risk_client_flows_through_to_approval(): void
     {
-        $case = $this->engine->startCase('business_standard', [
-            'company_name' => 'Test Firma Sp. z o.o.',
-            'nip' => '5261234567',
-            'contact_email' => 'test@firma.pl',
-            'annual_revenue' => 500_000,
-        ]);
+        $case = $this->givenLowRiskStandardCase();
 
-        self::assertSame(Status::Completed, $case->status());
-        self::assertSame(CaseOutcome::Approved, $case->caseOutcome());
-
-        // Verify event flow
-        $eventTypes = Stream::ofAll($this->recordedEvents)
-            ->map(fn(CaseEvent $e) => $e::class)
-            ->toArray();
-
-        // Pattern: Start → [Init → Pending → Finished] × 5 steps → CaseFinished
-        self::assertSame(CaseStarted::class, $eventTypes[0]);
-        self::assertSame(CaseFinished::class, end($eventTypes));
-
-        // Steps traversed: collect_prospect_data → check_kuc → calculate_risk → collect_basic_documents → final_approval
-        $stepsInitialized = Stream::ofAll($this->recordedEvents)
-            ->filter(fn($e) => $e instanceof ActionInitialized)
-            ->map(fn(ActionInitialized $e) => $e->stepId)
-            ->toArray();
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Approved);
+        $this->thenEventFlowStartsAndFinishes($case);
 
         self::assertSame([
             'collect_prospect_data',
@@ -109,7 +181,7 @@ final class OnboardingWorkflowTest extends TestCase
             'calculate_risk',
             'collect_basic_documents',
             'final_approval',
-        ], $stepsInitialized);
+        ], $this->thenStepsInitializedInOrder());
     }
 
     // --- Standard onboarding: Medium risk ---
@@ -117,24 +189,13 @@ final class OnboardingWorkflowTest extends TestCase
     #[Test]
     public function medium_risk_client_gets_extended_documents(): void
     {
-        $case = $this->engine->startCase('business_standard', [
-            'company_name' => 'Średnia Corp',
-            'nip' => '7891234567',
-            'contact_email' => 'cfo@srednia.pl',
-            'annual_revenue' => 5_000_000, // > 1M → medium_risk
-        ]);
+        $case = $this->givenMediumRiskStandardCase();
 
-        self::assertSame(Status::Completed, $case->status());
-        self::assertSame(CaseOutcome::Approved, $case->caseOutcome());
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Approved);
 
-        // Should go through extended documents
-        $stepsInitialized = Stream::ofAll($this->recordedEvents)
-            ->filter(fn($e) => $e instanceof ActionInitialized)
-            ->map(fn(ActionInitialized $e) => $e->stepId)
-            ->toArray();
-
-        self::assertContains('collect_extended_documents', $stepsInitialized);
-        self::assertNotContains('collect_basic_documents', $stepsInitialized);
+        $steps = $this->thenStepsInitializedInOrder();
+        self::assertContains('collect_extended_documents', $steps);
+        self::assertNotContains('collect_basic_documents', $steps);
     }
 
     // --- Standard onboarding: Flagged NIP ---
@@ -142,26 +203,16 @@ final class OnboardingWorkflowTest extends TestCase
     #[Test]
     public function flagged_nip_triggers_manual_review_then_continues(): void
     {
-        $case = $this->engine->startCase('business_standard', [
-            'company_name' => 'Podejrzana Sp. z o.o.',
-            'nip' => '9961234567', // starts with 99 → flagged
-            'contact_email' => 'info@podejrzana.pl',
-            'annual_revenue' => 200_000,
-        ]);
+        $case = $this->givenFlaggedNipCase();
 
-        self::assertSame(Status::Completed, $case->status());
-        self::assertSame(CaseOutcome::Approved, $case->caseOutcome());
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Approved);
 
-        $stepsInitialized = Stream::ofAll($this->recordedEvents)
-            ->filter(fn($e) => $e instanceof ActionInitialized)
-            ->map(fn(ActionInitialized $e) => $e->stepId)
-            ->toArray();
+        $steps = $this->thenStepsInitializedInOrder();
+        self::assertContains('manual_kuc_review', $steps);
 
-        // check_kuc → manual_kuc_review → calculate_risk
-        self::assertContains('manual_kuc_review', $stepsInitialized);
-        $kucIdx = array_search('check_kuc', $stepsInitialized);
-        $manualIdx = array_search('manual_kuc_review', $stepsInitialized);
-        $riskIdx = array_search('calculate_risk', $stepsInitialized);
+        $kucIdx = array_search('check_kuc', $steps);
+        $manualIdx = array_search('manual_kuc_review', $steps);
+        $riskIdx = array_search('calculate_risk', $steps);
         self::assertLessThan($manualIdx, $kucIdx);
         self::assertLessThan($riskIdx, $manualIdx);
     }
@@ -171,30 +222,16 @@ final class OnboardingWorkflowTest extends TestCase
     #[Test]
     public function nip_not_found_rejects_case(): void
     {
-        $case = $this->engine->startCase('business_standard', [
-            'company_name' => 'Ghost Ltd.',
-            'nip' => '0061234567', // starts with 00 → not_found
-            'contact_email' => 'ghost@nowhere.com',
-            'annual_revenue' => 100_000,
-        ]);
+        $case = $this->givenUnknownNipCase();
 
-        self::assertSame(Status::Completed, $case->status());
-        self::assertSame(CaseOutcome::Rejected, $case->caseOutcome());
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Rejected);
 
-        // Should only have 2 steps: collect_prospect_data → check_kuc (terminal)
-        $stepsInitialized = Stream::ofAll($this->recordedEvents)
-            ->filter(fn($e) => $e instanceof ActionInitialized)
-            ->map(fn(ActionInitialized $e) => $e->stepId)
-            ->toArray();
+        self::assertSame(
+            ['collect_prospect_data', 'check_kuc'],
+            $this->thenStepsInitializedInOrder(),
+        );
 
-        self::assertSame(['collect_prospect_data', 'check_kuc'], $stepsInitialized);
-
-        // Verify terminal action finished event
-        $terminalFinished = Stream::ofAll($this->recordedEvents)
-            ->find(fn($e) => $e instanceof ActionFinished && $e->isTerminal);
-
-        self::assertTrue($terminalFinished->isPresent());
-        self::assertSame('rejected', $terminalFinished->get()->caseOutcome);
+        $this->thenTerminalEventHasOutcome('rejected');
     }
 
     // --- Simplified onboarding ---
@@ -202,29 +239,16 @@ final class OnboardingWorkflowTest extends TestCase
     #[Test]
     public function simplified_partner_onboarding_completes(): void
     {
-        $case = $this->engine->startCase('business_simplified', [
-            'company_name' => 'Partner Fintech',
-            'nip' => '1234567890',
-            'contact_email' => 'partner@fintech.pl',
-            'partner_referral_code' => 'REF-001',
-            'annual_revenue' => 300_000,
-        ]);
+        $case = $this->givenSimplifiedPartnerCase();
 
-        self::assertSame(Status::Completed, $case->status());
-        self::assertSame(CaseOutcome::Approved, $case->caseOutcome());
-
-        // Simplified path: collect_prospect_data → quick_risk_check → collect_minimal_documents → auto_approve
-        $stepsInitialized = Stream::ofAll($this->recordedEvents)
-            ->filter(fn($e) => $e instanceof ActionInitialized)
-            ->map(fn(ActionInitialized $e) => $e->stepId)
-            ->toArray();
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Approved);
 
         self::assertSame([
             'collect_prospect_data',
             'quick_risk_check',
             'collect_minimal_documents',
             'auto_approve',
-        ], $stepsInitialized);
+        ], $this->thenStepsInitializedInOrder());
     }
 
     // --- Stage transitions ---
@@ -232,23 +256,9 @@ final class OnboardingWorkflowTest extends TestCase
     #[Test]
     public function stages_are_properly_completed_during_workflow(): void
     {
-        $case = $this->engine->startCase('business_standard', [
-            'company_name' => 'Stage Test',
-            'nip' => '5261234567',
-            'contact_email' => 'test@test.pl',
-            'annual_revenue' => 500_000,
-        ]);
+        $case = $this->givenLowRiskStandardCase();
 
-        $stageStatuses = [];
-        $case->stages()->forEach(function ($stage) use (&$stageStatuses) {
-            $stageStatuses[$stage->name] = $stage->status();
-        });
-
-        // All stages should be completed after successful flow
-        self::assertSame(Status::Completed, $stageStatuses['Prospect Intake']);
-        self::assertSame(Status::Completed, $stageStatuses['Client Verification']);
-        self::assertSame(Status::Completed, $stageStatuses['Document Collection']);
-        self::assertSame(Status::Completed, $stageStatuses['Finalization']);
+        $this->thenAllStagesAreCompleted($case);
     }
 
     // --- Event audit trail ---
@@ -256,19 +266,10 @@ final class OnboardingWorkflowTest extends TestCase
     #[Test]
     public function all_events_have_case_id_and_timestamp(): void
     {
-        $case = $this->engine->startCase('business_standard', [
-            'company_name' => 'Event Test',
-            'nip' => '5261234567',
-            'contact_email' => 'test@test.pl',
-            'annual_revenue' => 500_000,
-        ]);
+        $case = $this->givenLowRiskStandardCase();
 
         self::assertNotEmpty($this->recordedEvents);
-
-        foreach ($this->recordedEvents as $event) {
-            self::assertSame($case->id->value, $event->caseId());
-            self::assertNotNull($event->occurredAt());
-        }
+        $this->thenAllEventsHaveCaseId($case);
     }
 
     // --- Engine case retrieval ---
@@ -276,12 +277,7 @@ final class OnboardingWorkflowTest extends TestCase
     #[Test]
     public function engine_stores_and_retrieves_cases(): void
     {
-        $case = $this->engine->startCase('business_standard', [
-            'company_name' => 'Retrieval Test',
-            'nip' => '5261234567',
-            'contact_email' => 'test@test.pl',
-            'annual_revenue' => 500_000,
-        ]);
+        $case = $this->givenLowRiskStandardCase();
 
         $retrieved = $this->engine->getCase($case->id->value);
         self::assertSame($case, $retrieved);

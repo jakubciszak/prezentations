@@ -4,32 +4,71 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Model;
 
-use App\Onboarding\Model\Outcome;
-use App\Onboarding\Model\ServiceAction;
 use App\Onboarding\Model\State\IllegalStateTransitionException;
 use App\Onboarding\Model\Status;
 use App\Onboarding\Model\Step;
-use App\Onboarding\Model\StepId;
+use Tests\Factory\OutcomeFactory;
+use Tests\Factory\StepFactory;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 final class StepTest extends TestCase
 {
-    private function createStep(string $id = 'check_kuc'): Step
+    // --- given ---
+
+    private function givenInitializedStep(): Step
     {
-        return new Step(
-            stepId: new StepId($id),
-            name: 'KUC Registry Check',
-            serviceAction: new ServiceAction('kuc', 'check_registry'),
-        );
+        return StepFactory::initialized();
     }
+
+    private function givenPendingStep(): Step
+    {
+        return StepFactory::pending();
+    }
+
+    private function givenCompletedStep(): Step
+    {
+        return StepFactory::completed(outcomeValue: 'clean');
+    }
+
+    // --- when ---
+
+    private function whenTheStepIsMarkedPending(Step $step): void
+    {
+        $step->markPending();
+    }
+
+    private function whenTheStepIsCompleted(Step $step, string $outcomeValue = 'clean', array $metadata = []): void
+    {
+        $step->complete(OutcomeFactory::withValue($outcomeValue, $metadata));
+    }
+
+    private function whenTheStepFails(Step $step, string $outcomeValue = 'timeout'): void
+    {
+        $step->fail(OutcomeFactory::withValue($outcomeValue));
+    }
+
+    // --- then ---
+
+    private function thenStepHasStatus(Step $step, Status $expected): void
+    {
+        self::assertSame($expected, $step->status());
+    }
+
+    private function thenStepHasOutcome(Step $step, string $expectedValue): void
+    {
+        self::assertNotNull($step->outcome());
+        self::assertSame($expectedValue, $step->outcome()->value);
+    }
+
+    // --- tests ---
 
     #[Test]
     public function new_step_is_initialized(): void
     {
-        $step = $this->createStep();
+        $step = $this->givenInitializedStep();
 
-        self::assertSame(Status::Initialized, $step->status());
+        $this->thenStepHasStatus($step, Status::Initialized);
         self::assertNull($step->outcome());
         self::assertNull($step->startedAt());
         self::assertNull($step->completedAt());
@@ -38,7 +77,7 @@ final class StepTest extends TestCase
     #[Test]
     public function step_exposes_identity_and_service_action(): void
     {
-        $step = $this->createStep('verify_nip');
+        $step = StepFactory::initialized(id: 'verify_nip', service: 'kuc', action: 'check_registry');
 
         self::assertSame('verify_nip', $step->stepId->value);
         self::assertSame('kuc', $step->serviceAction->service);
@@ -49,25 +88,23 @@ final class StepTest extends TestCase
     #[Test]
     public function mark_pending_transitions_step(): void
     {
-        $step = $this->createStep();
+        $step = $this->givenInitializedStep();
 
-        $step->markPending();
+        $this->whenTheStepIsMarkedPending($step);
 
-        self::assertSame(Status::Pending, $step->status());
+        $this->thenStepHasStatus($step, Status::Pending);
         self::assertNotNull($step->startedAt());
     }
 
     #[Test]
     public function complete_with_outcome(): void
     {
-        $step = $this->createStep();
-        $step->markPending();
+        $step = $this->givenPendingStep();
 
-        $outcome = new Outcome('clean', ['nip' => '5261234567']);
-        $step->complete($outcome);
+        $this->whenTheStepIsCompleted($step, 'clean', ['nip' => '5261234567']);
 
-        self::assertSame(Status::Completed, $step->status());
-        self::assertSame('clean', $step->outcome()->value);
+        $this->thenStepHasStatus($step, Status::Completed);
+        $this->thenStepHasOutcome($step, 'clean');
         self::assertSame('5261234567', $step->outcome()->metadata['nip']);
         self::assertNotNull($step->completedAt());
     }
@@ -75,56 +112,47 @@ final class StepTest extends TestCase
     #[Test]
     public function fail_with_outcome(): void
     {
-        $step = $this->createStep();
-        $step->markPending();
+        $step = $this->givenPendingStep();
 
-        $outcome = new Outcome('timeout');
-        $step->fail($outcome);
+        $this->whenTheStepFails($step, 'timeout');
 
-        self::assertSame(Status::Failed, $step->status());
-        self::assertSame('timeout', $step->outcome()->value);
+        $this->thenStepHasStatus($step, Status::Failed);
+        $this->thenStepHasOutcome($step, 'timeout');
     }
 
     #[Test]
     public function cannot_complete_without_pending_first(): void
     {
-        $step = $this->createStep();
+        $step = $this->givenInitializedStep();
 
         $this->expectException(IllegalStateTransitionException::class);
-
-        $step->complete(new Outcome('clean'));
+        $this->whenTheStepIsCompleted($step);
     }
 
     #[Test]
     public function cannot_fail_without_pending_first(): void
     {
-        $step = $this->createStep();
+        $step = $this->givenInitializedStep();
 
         $this->expectException(IllegalStateTransitionException::class);
-
-        $step->fail(new Outcome('error'));
+        $this->whenTheStepFails($step);
     }
 
     #[Test]
     public function cannot_mark_pending_twice(): void
     {
-        $step = $this->createStep();
-        $step->markPending();
+        $step = $this->givenPendingStep();
 
         $this->expectException(IllegalStateTransitionException::class);
-
-        $step->markPending();
+        $this->whenTheStepIsMarkedPending($step);
     }
 
     #[Test]
     public function cannot_complete_after_completed(): void
     {
-        $step = $this->createStep();
-        $step->markPending();
-        $step->complete(new Outcome('clean'));
+        $step = $this->givenCompletedStep();
 
         $this->expectException(IllegalStateTransitionException::class);
-
-        $step->complete(new Outcome('flagged'));
+        $this->whenTheStepIsCompleted($step, 'flagged');
     }
 }

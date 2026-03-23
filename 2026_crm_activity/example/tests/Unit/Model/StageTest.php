@@ -4,38 +4,81 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Model;
 
-use App\Onboarding\Model\Outcome;
-use App\Onboarding\Model\ServiceAction;
 use App\Onboarding\Model\Stage;
-use App\Onboarding\Model\StageId;
 use App\Onboarding\Model\Status;
 use App\Onboarding\Model\Step;
 use App\Onboarding\Model\StepId;
+use Tests\Factory\OutcomeFactory;
+use Tests\Factory\StageBuilder;
+use Tests\Factory\StepFactory;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 final class StageTest extends TestCase
 {
-    private function createStage(): Stage
+    // --- given ---
+
+    private function givenEmptyStage(): Stage
     {
-        return new Stage(new StageId('verification'), 'Client Verification');
+        return StageBuilder::aStage()->build();
     }
 
-    private function createStep(string $id, string $service = 'kuc', string $action = 'check'): Step
+    private function givenStageWithSteps(Step ...$steps): Stage
     {
-        return new Step(
-            new StepId($id),
-            "Step {$id}",
-            new ServiceAction($service, $action),
-        );
+        return StageBuilder::aStage()->withSteps(...$steps)->build();
     }
+
+    private function givenStageWithStartedStep(string $stepId): Stage
+    {
+        return StageBuilder::aStage()
+            ->withStep(StepFactory::initialized($stepId))
+            ->withStartedStep($stepId)
+            ->build();
+    }
+
+    // --- when ---
+
+    private function whenStepIsStarted(Stage $stage, string $stepId): Step
+    {
+        return $stage->startStep(new StepId($stepId));
+    }
+
+    private function whenStageIsMarkedCompleted(Stage $stage): void
+    {
+        $stage->markCompleted();
+    }
+
+    // --- then ---
+
+    private function thenStageHasStatus(Stage $stage, Status $expected): void
+    {
+        self::assertSame($expected, $stage->status());
+    }
+
+    private function thenStageHasStep(Stage $stage, string $stepId): void
+    {
+        self::assertTrue($stage->hasStep(new StepId($stepId)));
+    }
+
+    private function thenStageDoesNotHaveStep(Stage $stage, string $stepId): void
+    {
+        self::assertFalse($stage->hasStep(new StepId($stepId)));
+    }
+
+    private function thenCurrentStepIs(Stage $stage, string $expectedStepId): void
+    {
+        self::assertNotNull($stage->currentStep());
+        self::assertSame($expectedStepId, $stage->currentStep()->stepId->value);
+    }
+
+    // --- tests ---
 
     #[Test]
     public function new_stage_is_initialized(): void
     {
-        $stage = $this->createStage();
+        $stage = $this->givenEmptyStage();
 
-        self::assertSame(Status::Initialized, $stage->status());
+        $this->thenStageHasStatus($stage, Status::Initialized);
         self::assertSame('verification', $stage->stageId->value);
         self::assertSame('Client Verification', $stage->name);
         self::assertNull($stage->currentStep());
@@ -44,23 +87,20 @@ final class StageTest extends TestCase
     #[Test]
     public function can_add_and_retrieve_steps(): void
     {
-        $stage = $this->createStage();
-        $step1 = $this->createStep('check_kuc');
-        $step2 = $this->createStep('calculate_risk', 'risk', 'calculate');
+        $stage = $this->givenStageWithSteps(
+            StepFactory::initialized('check_kuc'),
+            StepFactory::initialized('calculate_risk', service: 'risk', action: 'calculate'),
+        );
 
-        $stage->addStep($step1);
-        $stage->addStep($step2);
-
-        self::assertTrue($stage->hasStep(new StepId('check_kuc')));
-        self::assertTrue($stage->hasStep(new StepId('calculate_risk')));
-        self::assertFalse($stage->hasStep(new StepId('nonexistent')));
+        $this->thenStageHasStep($stage, 'check_kuc');
+        $this->thenStageHasStep($stage, 'calculate_risk');
+        $this->thenStageDoesNotHaveStep($stage, 'nonexistent');
     }
 
     #[Test]
     public function get_step_returns_option_some_for_existing(): void
     {
-        $stage = $this->createStage();
-        $stage->addStep($this->createStep('check_kuc'));
+        $stage = $this->givenStageWithSteps(StepFactory::initialized('check_kuc'));
 
         $result = $stage->getStep(new StepId('check_kuc'));
 
@@ -71,7 +111,7 @@ final class StageTest extends TestCase
     #[Test]
     public function get_step_returns_option_none_for_missing(): void
     {
-        $stage = $this->createStage();
+        $stage = $this->givenEmptyStage();
 
         $result = $stage->getStep(new StepId('nonexistent'));
 
@@ -81,74 +121,71 @@ final class StageTest extends TestCase
     #[Test]
     public function start_step_marks_step_pending_and_stage_pending(): void
     {
-        $stage = $this->createStage();
-        $stage->addStep($this->createStep('check_kuc'));
+        $stage = $this->givenStageWithSteps(StepFactory::initialized('check_kuc'));
 
-        $step = $stage->startStep(new StepId('check_kuc'));
+        $step = $this->whenStepIsStarted($stage, 'check_kuc');
 
-        self::assertSame(Status::Pending, $step->status());
-        self::assertSame(Status::Pending, $stage->status());
-        self::assertNotNull($stage->currentStep());
-        self::assertSame('check_kuc', $stage->currentStep()->stepId->value);
+        $this->thenStepHasStatus($step, Status::Pending);
+        $this->thenStageHasStatus($stage, Status::Pending);
+        $this->thenCurrentStepIs($stage, 'check_kuc');
     }
 
     #[Test]
     public function start_step_throws_for_unknown_step(): void
     {
-        $stage = $this->createStage();
+        $stage = $this->givenEmptyStage();
 
         $this->expectException(\InvalidArgumentException::class);
-
-        $stage->startStep(new StepId('unknown'));
+        $this->whenStepIsStarted($stage, 'unknown');
     }
 
     #[Test]
     public function starting_second_step_keeps_stage_pending(): void
     {
-        $stage = $this->createStage();
-        $stage->addStep($this->createStep('check_kuc'));
-        $stage->addStep($this->createStep('calculate_risk', 'risk', 'calculate'));
+        $stage = $this->givenStageWithSteps(
+            StepFactory::initialized('check_kuc'),
+            StepFactory::initialized('calculate_risk', service: 'risk', action: 'calculate'),
+        );
 
-        $stage->startStep(new StepId('check_kuc'));
-        $step1 = $stage->getStep(new StepId('check_kuc'))->get();
-        $step1->complete(new Outcome('clean'));
+        $this->whenStepIsStarted($stage, 'check_kuc');
+        $stage->getStep(new StepId('check_kuc'))->get()->complete(OutcomeFactory::clean());
+        $this->whenStepIsStarted($stage, 'calculate_risk');
 
-        $stage->startStep(new StepId('calculate_risk'));
-
-        self::assertSame(Status::Pending, $stage->status());
-        self::assertSame('calculate_risk', $stage->currentStep()->stepId->value);
+        $this->thenStageHasStatus($stage, Status::Pending);
+        $this->thenCurrentStepIs($stage, 'calculate_risk');
     }
 
     #[Test]
     public function mark_completed_changes_status(): void
     {
-        $stage = $this->createStage();
-        $stage->addStep($this->createStep('check_kuc'));
-        $stage->startStep(new StepId('check_kuc'));
+        $stage = $this->givenStageWithStartedStep('check_kuc');
 
-        $stage->markCompleted();
+        $this->whenStageIsMarkedCompleted($stage);
 
-        self::assertSame(Status::Completed, $stage->status());
+        $this->thenStageHasStatus($stage, Status::Completed);
     }
 
     #[Test]
     public function steps_returns_stream_of_all_steps(): void
     {
-        $stage = $this->createStage();
-        $stage->addStep($this->createStep('step_a'));
-        $stage->addStep($this->createStep('step_b'));
-        $stage->addStep($this->createStep('step_c'));
+        $stage = $this->givenStageWithSteps(
+            StepFactory::initialized('step_a'),
+            StepFactory::initialized('step_b'),
+            StepFactory::initialized('step_c'),
+        );
 
-        $steps = $stage->steps();
-
-        $ids = [];
-        $steps->forEach(function (Step $s) use (&$ids) {
-            $ids[] = $s->stepId->value;
-        });
+        $ids = $stage->steps()->map(fn(Step $s) => $s->stepId->value)->toArray();
 
         self::assertCount(3, $ids);
         self::assertContains('step_a', $ids);
         self::assertContains('step_b', $ids);
         self::assertContains('step_c', $ids);
+    }
+
+    // --- private helper for step status (shared) ---
+
+    private function thenStepHasStatus(Step $step, Status $expected): void
+    {
+        self::assertSame($expected, $step->status());
     }
 }

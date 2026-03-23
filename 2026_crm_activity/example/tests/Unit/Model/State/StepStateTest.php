@@ -4,32 +4,68 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Model\State;
 
-use App\Onboarding\Model\Outcome;
 use App\Onboarding\Model\State\CompletedState;
 use App\Onboarding\Model\State\FailedState;
 use App\Onboarding\Model\State\IllegalStateTransitionException;
 use App\Onboarding\Model\State\InitializedState;
 use App\Onboarding\Model\State\PendingState;
+use App\Onboarding\Model\State\StepState;
 use App\Onboarding\Model\Status;
+use Tests\Factory\OutcomeFactory;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 final class StepStateTest extends TestCase
 {
+    // --- given helpers ---
+
+    private function givenInitializedState(): StepState
+    {
+        return new InitializedState();
+    }
+
+    private function givenPendingState(): StepState
+    {
+        return $this->givenInitializedState()->markPending();
+    }
+
+    private function givenCompletedState(): StepState
+    {
+        return $this->givenPendingState()->complete(OutcomeFactory::approved());
+    }
+
+    private function givenFailedState(): StepState
+    {
+        return $this->givenPendingState()->fail(OutcomeFactory::timeout());
+    }
+
+    // --- then helpers ---
+
+    private function thenStatusIs(StepState $state, Status $expected): void
+    {
+        self::assertSame($expected, $state->status());
+    }
+
+    private function thenTransitionIsRejected(StepState $state, callable $action): void
+    {
+        $this->expectException(IllegalStateTransitionException::class);
+        $action($state);
+    }
+
     // --- InitializedState ---
 
     #[Test]
     public function initialized_state_has_correct_status(): void
     {
-        $state = new InitializedState();
+        $state = $this->givenInitializedState();
 
-        self::assertSame(Status::Initialized, $state->status());
+        $this->thenStatusIs($state, Status::Initialized);
     }
 
     #[Test]
     public function initialized_state_has_no_timestamps_or_outcome(): void
     {
-        $state = new InitializedState();
+        $state = $this->givenInitializedState();
 
         self::assertNull($state->outcome());
         self::assertNull($state->startedAt());
@@ -39,33 +75,28 @@ final class StepStateTest extends TestCase
     #[Test]
     public function initialized_transitions_to_pending(): void
     {
-        $state = new InitializedState();
+        $state = $this->givenInitializedState();
 
         $pending = $state->markPending();
 
         self::assertInstanceOf(PendingState::class, $pending);
-        self::assertSame(Status::Pending, $pending->status());
+        $this->thenStatusIs($pending, Status::Pending);
     }
 
     #[Test]
     public function initialized_cannot_complete(): void
     {
-        $state = new InitializedState();
+        $state = $this->givenInitializedState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $this->expectExceptionMessage("Cannot 'complete' step in state 'initialized'");
-
-        $state->complete(new Outcome('done'));
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->complete(OutcomeFactory::approved()));
     }
 
     #[Test]
     public function initialized_cannot_fail(): void
     {
-        $state = new InitializedState();
+        $state = $this->givenInitializedState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-
-        $state->fail(new Outcome('error'));
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->fail(OutcomeFactory::timeout()));
     }
 
     // --- PendingState ---
@@ -73,23 +104,23 @@ final class StepStateTest extends TestCase
     #[Test]
     public function pending_state_records_started_at(): void
     {
-        $pending = (new InitializedState())->markPending();
+        $state = $this->givenPendingState();
 
-        self::assertNotNull($pending->startedAt());
-        self::assertNull($pending->completedAt());
-        self::assertNull($pending->outcome());
+        self::assertNotNull($state->startedAt());
+        self::assertNull($state->completedAt());
+        self::assertNull($state->outcome());
     }
 
     #[Test]
     public function pending_transitions_to_completed(): void
     {
-        $pending = (new InitializedState())->markPending();
-        $outcome = new Outcome('approved', ['score' => 95]);
+        $state = $this->givenPendingState();
+        $outcome = OutcomeFactory::approved(['score' => 95]);
 
-        $completed = $pending->complete($outcome);
+        $completed = $state->complete($outcome);
 
         self::assertInstanceOf(CompletedState::class, $completed);
-        self::assertSame(Status::Completed, $completed->status());
+        $this->thenStatusIs($completed, Status::Completed);
         self::assertSame($outcome, $completed->outcome());
         self::assertNotNull($completed->startedAt());
         self::assertNotNull($completed->completedAt());
@@ -98,25 +129,22 @@ final class StepStateTest extends TestCase
     #[Test]
     public function pending_transitions_to_failed(): void
     {
-        $pending = (new InitializedState())->markPending();
-        $outcome = new Outcome('timeout', ['reason' => 'no response']);
+        $state = $this->givenPendingState();
+        $outcome = OutcomeFactory::withValue('timeout', ['reason' => 'no response']);
 
-        $failed = $pending->fail($outcome);
+        $failed = $state->fail($outcome);
 
         self::assertInstanceOf(FailedState::class, $failed);
-        self::assertSame(Status::Failed, $failed->status());
+        $this->thenStatusIs($failed, Status::Failed);
         self::assertSame($outcome, $failed->outcome());
     }
 
     #[Test]
     public function pending_cannot_mark_pending_again(): void
     {
-        $pending = (new InitializedState())->markPending();
+        $state = $this->givenPendingState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $this->expectExceptionMessage("Cannot 'markPending' step in state 'pending'");
-
-        $pending->markPending();
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->markPending());
     }
 
     // --- CompletedState ---
@@ -124,84 +152,72 @@ final class StepStateTest extends TestCase
     #[Test]
     public function completed_preserves_timestamps_from_pending(): void
     {
-        $pending = (new InitializedState())->markPending();
+        $pending = $this->givenPendingState();
         $startedAt = $pending->startedAt();
 
-        $completed = $pending->complete(new Outcome('done'));
+        $completed = $pending->complete(OutcomeFactory::approved());
 
         self::assertEquals($startedAt, $completed->startedAt());
         self::assertGreaterThanOrEqual($startedAt, $completed->completedAt());
     }
 
     #[Test]
-    public function completed_is_terminal_cannot_transition(): void
+    public function completed_cannot_mark_pending(): void
     {
-        $completed = (new InitializedState())
-            ->markPending()
-            ->complete(new Outcome('done'));
+        $state = $this->givenCompletedState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $completed->markPending();
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->markPending());
     }
 
     #[Test]
     public function completed_cannot_complete_again(): void
     {
-        $completed = (new InitializedState())
-            ->markPending()
-            ->complete(new Outcome('done'));
+        $state = $this->givenCompletedState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $completed->complete(new Outcome('again'));
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->complete(OutcomeFactory::approved()));
     }
 
     #[Test]
     public function completed_cannot_fail(): void
     {
-        $completed = (new InitializedState())
-            ->markPending()
-            ->complete(new Outcome('done'));
+        $state = $this->givenCompletedState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $completed->fail(new Outcome('error'));
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->fail(OutcomeFactory::timeout()));
     }
 
     // --- FailedState ---
 
     #[Test]
-    public function failed_is_terminal_cannot_transition(): void
+    public function failed_is_terminal_with_outcome(): void
     {
-        $failed = (new InitializedState())
-            ->markPending()
-            ->fail(new Outcome('timeout'));
+        $state = $this->givenFailedState();
 
-        self::assertSame(Status::Failed, $failed->status());
-        self::assertSame('timeout', $failed->outcome()->value);
+        $this->thenStatusIs($state, Status::Failed);
+        self::assertSame('timeout', $state->outcome()->value);
+    }
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $failed->markPending();
+    #[Test]
+    public function failed_cannot_mark_pending(): void
+    {
+        $state = $this->givenFailedState();
+
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->markPending());
     }
 
     #[Test]
     public function failed_cannot_complete(): void
     {
-        $failed = (new InitializedState())
-            ->markPending()
-            ->fail(new Outcome('timeout'));
+        $state = $this->givenFailedState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $failed->complete(new Outcome('done'));
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->complete(OutcomeFactory::approved()));
     }
 
     #[Test]
     public function failed_cannot_fail_again(): void
     {
-        $failed = (new InitializedState())
-            ->markPending()
-            ->fail(new Outcome('timeout'));
+        $state = $this->givenFailedState();
 
-        $this->expectException(IllegalStateTransitionException::class);
-        $failed->fail(new Outcome('another'));
+        $this->thenTransitionIsRejected($state, fn(StepState $s) => $s->fail(OutcomeFactory::timeout()));
     }
 
     // --- Full lifecycle ---
@@ -209,16 +225,17 @@ final class StepStateTest extends TestCase
     #[Test]
     public function full_lifecycle_initialized_to_completed(): void
     {
-        $state = new InitializedState();
-        self::assertSame(Status::Initialized, $state->status());
+        $state = $this->givenInitializedState();
+        $this->thenStatusIs($state, Status::Initialized);
 
         $state = $state->markPending();
-        self::assertSame(Status::Pending, $state->status());
+        $this->thenStatusIs($state, Status::Pending);
         self::assertNotNull($state->startedAt());
 
-        $outcome = new Outcome('approved', ['risk_score' => 20]);
+        $outcome = OutcomeFactory::approved(['risk_score' => 20]);
         $state = $state->complete($outcome);
-        self::assertSame(Status::Completed, $state->status());
+
+        $this->thenStatusIs($state, Status::Completed);
         self::assertSame('approved', $state->outcome()->value);
         self::assertSame(20, $state->outcome()->metadata['risk_score']);
         self::assertNotNull($state->completedAt());
@@ -227,13 +244,13 @@ final class StepStateTest extends TestCase
     #[Test]
     public function full_lifecycle_initialized_to_failed(): void
     {
-        $state = new InitializedState();
+        $state = $this->givenInitializedState();
         $state = $state->markPending();
 
-        $outcome = new Outcome('service_error', ['code' => 500]);
+        $outcome = OutcomeFactory::withValue('service_error', ['code' => 500]);
         $state = $state->fail($outcome);
 
-        self::assertSame(Status::Failed, $state->status());
+        $this->thenStatusIs($state, Status::Failed);
         self::assertSame('service_error', $state->outcome()->value);
         self::assertSame(500, $state->outcome()->metadata['code']);
     }

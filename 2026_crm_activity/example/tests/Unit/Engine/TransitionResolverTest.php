@@ -6,8 +6,11 @@ namespace Tests\Unit\Engine;
 
 use App\Onboarding\Engine\TransitionResolver;
 use App\Onboarding\Model\CaseOutcome;
-use App\Onboarding\Model\Outcome;
+use App\Onboarding\Model\Transition;
 use App\Onboarding\Template\StepDefinition;
+use Munus\Control\Option;
+use Tests\Factory\OutcomeFactory;
+use Tests\Factory\StepDefinitionBuilder;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -20,79 +23,109 @@ final class TransitionResolverTest extends TestCase
         $this->resolver = new TransitionResolver();
     }
 
-    private function stepWithOutcomes(array $outcomes): StepDefinition
+    // --- given ---
+
+    private function givenStepWithBranchingOutcomes(): StepDefinition
     {
-        return new StepDefinition(
-            id: 'test_step',
-            name: 'Test Step',
-            service: 'test_service',
-            action: 'test_action',
-            outcomes: $outcomes,
-        );
+        return StepDefinitionBuilder::aStepDefinition()
+            ->withNextStepOutcome('clean', 'calculate_risk')
+            ->withNextStepOutcome('flagged', 'manual_review')
+            ->build();
     }
+
+    private function givenStepWithTerminalOutcomes(): StepDefinition
+    {
+        return StepDefinitionBuilder::aStepDefinition()
+            ->withTerminalOutcome('approved', 'approved')
+            ->withTerminalOutcome('rejected', 'rejected')
+            ->build();
+    }
+
+    private function givenStepWithRiskOutcomes(): StepDefinition
+    {
+        return StepDefinitionBuilder::aStepDefinition()
+            ->withId('calculate_risk')
+            ->withNextStepOutcome('low_risk', 'basic_docs')
+            ->withNextStepOutcome('medium_risk', 'extended_docs')
+            ->withTerminalOutcome('high_risk', 'rejected')
+            ->build();
+    }
+
+    // --- when ---
+
+    private function whenResolvingOutcome(StepDefinition $step, string $outcomeValue): Option
+    {
+        return $this->resolver->resolve($step, OutcomeFactory::withValue($outcomeValue));
+    }
+
+    // --- then ---
+
+    private function thenTransitionGoesToStep(Option $result, string $expectedStepId): void
+    {
+        self::assertTrue($result->isPresent());
+        $transition = $result->get();
+        self::assertFalse($transition->isTerminal);
+        self::assertSame($expectedStepId, $transition->nextStepId->value);
+        self::assertNull($transition->caseOutcome);
+    }
+
+    private function thenTransitionIsTerminal(Option $result, CaseOutcome $expectedOutcome): void
+    {
+        self::assertTrue($result->isPresent());
+        $transition = $result->get();
+        self::assertTrue($transition->isTerminal);
+        self::assertSame($expectedOutcome, $transition->caseOutcome);
+        self::assertNull($transition->nextStepId);
+    }
+
+    private function thenNoTransitionFound(Option $result): void
+    {
+        self::assertTrue($result->isEmpty());
+    }
+
+    // --- tests ---
 
     #[Test]
     public function resolves_next_step_transition(): void
     {
-        $step = $this->stepWithOutcomes([
-            'clean' => ['next_step' => 'calculate_risk'],
-            'flagged' => ['next_step' => 'manual_review'],
-        ]);
+        $step = $this->givenStepWithBranchingOutcomes();
 
-        $result = $this->resolver->resolve($step, new Outcome('clean'));
+        $result = $this->whenResolvingOutcome($step, 'clean');
 
-        self::assertTrue($result->isPresent());
-        $transition = $result->get();
-        self::assertFalse($transition->isTerminal);
-        self::assertSame('calculate_risk', $transition->nextStepId->value);
-        self::assertNull($transition->caseOutcome);
+        $this->thenTransitionGoesToStep($result, 'calculate_risk');
     }
 
     #[Test]
     public function resolves_terminal_transition(): void
     {
-        $step = $this->stepWithOutcomes([
-            'approved' => ['terminal' => true, 'case_outcome' => 'approved'],
-            'rejected' => ['terminal' => true, 'case_outcome' => 'rejected'],
-        ]);
+        $step = $this->givenStepWithTerminalOutcomes();
 
-        $result = $this->resolver->resolve($step, new Outcome('rejected'));
+        $result = $this->whenResolvingOutcome($step, 'rejected');
 
-        self::assertTrue($result->isPresent());
-        $transition = $result->get();
-        self::assertTrue($transition->isTerminal);
-        self::assertSame(CaseOutcome::Rejected, $transition->caseOutcome);
-        self::assertNull($transition->nextStepId);
+        $this->thenTransitionIsTerminal($result, CaseOutcome::Rejected);
     }
 
     #[Test]
     public function returns_none_for_unknown_outcome(): void
     {
-        $step = $this->stepWithOutcomes([
-            'clean' => ['next_step' => 'next'],
-        ]);
+        $step = $this->givenStepWithBranchingOutcomes();
 
-        $result = $this->resolver->resolve($step, new Outcome('unknown'));
+        $result = $this->whenResolvingOutcome($step, 'unknown');
 
-        self::assertTrue($result->isEmpty());
+        $this->thenNoTransitionFound($result);
     }
 
     #[Test]
     public function resolves_correct_branch_among_multiple(): void
     {
-        $step = $this->stepWithOutcomes([
-            'low_risk' => ['next_step' => 'basic_docs'],
-            'medium_risk' => ['next_step' => 'extended_docs'],
-            'high_risk' => ['terminal' => true, 'case_outcome' => 'rejected'],
-        ]);
+        $step = $this->givenStepWithRiskOutcomes();
 
-        $low = $this->resolver->resolve($step, new Outcome('low_risk'));
-        $medium = $this->resolver->resolve($step, new Outcome('medium_risk'));
-        $high = $this->resolver->resolve($step, new Outcome('high_risk'));
+        $low = $this->whenResolvingOutcome($step, 'low_risk');
+        $medium = $this->whenResolvingOutcome($step, 'medium_risk');
+        $high = $this->whenResolvingOutcome($step, 'high_risk');
 
-        self::assertSame('basic_docs', $low->get()->nextStepId->value);
-        self::assertSame('extended_docs', $medium->get()->nextStepId->value);
-        self::assertTrue($high->get()->isTerminal);
-        self::assertSame(CaseOutcome::Rejected, $high->get()->caseOutcome);
+        $this->thenTransitionGoesToStep($low, 'basic_docs');
+        $this->thenTransitionGoesToStep($medium, 'extended_docs');
+        $this->thenTransitionIsTerminal($high, CaseOutcome::Rejected);
     }
 }
