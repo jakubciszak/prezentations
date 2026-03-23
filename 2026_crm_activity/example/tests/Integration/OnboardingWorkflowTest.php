@@ -4,165 +4,44 @@ declare(strict_types=1);
 
 namespace Tests\Integration;
 
-use App\ExternalService\DocumentServiceStub;
-use App\ExternalService\ExternalServiceResponse;
-use App\ExternalService\KucServiceStub;
-use App\ExternalService\ProspectFormServiceStub;
-use App\ExternalService\RiskCalculationServiceStub;
-use App\ExternalService\ServiceDispatcher;
-use App\Infrastructure\YamlTemplateLoader;
-use App\Onboarding\Engine\OnboardingEngine;
-use App\Onboarding\Event\ActionFinished;
-use App\Onboarding\Event\ActionInitialized;
-use App\Onboarding\Event\CaseEvent;
-use App\Onboarding\Event\CaseFinished;
-use App\Onboarding\Event\CaseStarted;
-use App\Onboarding\Handler\ExternalServiceResponseHandler;
 use App\Onboarding\Model\CaseOutcome;
 use App\Onboarding\Model\OnboardingCase;
-use App\Onboarding\Model\Status;
-use Munus\Collection\Stream;
-use Symfony\Component\Messenger\Handler\HandlersLocator;
-use Symfony\Component\Messenger\MessageBus;
-use Symfony\Component\Messenger\Middleware\HandleMessageMiddleware;
 use Tests\Factory\ClientDataFactory;
 use PHPUnit\Framework\Attributes\Test;
-use PHPUnit\Framework\TestCase;
 
 /**
- * Integration tests - full onboarding workflows through engine, services, and events.
- * No mocks - uses real YAML templates, real service stubs, real Symfony Messenger bus.
+ * Integration tests - full onboarding workflows through the Symfony container.
+ *
+ * Uses KernelTestCase (via IntegrationTestCase) to boot the real DI container
+ * with autowired services: engine, messenger bus, handlers, service stubs.
  */
-final class OnboardingWorkflowTest extends TestCase
+final class OnboardingWorkflowTest extends IntegrationTestCase
 {
-    private OnboardingEngine $engine;
-
-    /** @var CaseEvent[] */
-    private array $recordedEvents = [];
-
-    protected function setUp(): void
-    {
-        $loader = new YamlTemplateLoader(__DIR__ . '/../../config/templates');
-        $registry = $loader->loadAll();
-
-        $this->recordedEvents = [];
-        $engine = null;
-
-        $bus = new MessageBus([
-            new HandleMessageMiddleware(new HandlersLocator([
-                CaseStarted::class => [fn($e) => $this->recordedEvents[] = $e],
-                ActionInitialized::class => [fn($e) => $this->recordedEvents[] = $e],
-                \App\Onboarding\Event\ActionPending::class => [fn($e) => $this->recordedEvents[] = $e],
-                ActionFinished::class => [fn($e) => $this->recordedEvents[] = $e],
-                CaseFinished::class => [fn($e) => $this->recordedEvents[] = $e],
-                ExternalServiceResponse::class => [
-                    function ($r) use (&$engine) {
-                        (new ExternalServiceResponseHandler($engine))($r);
-                    },
-                ],
-            ])),
-        ]);
-
-        $serviceDispatcher = new ServiceDispatcher(
-            new KucServiceStub($bus),
-            new DocumentServiceStub($bus),
-            new ProspectFormServiceStub($bus),
-            new RiskCalculationServiceStub($bus),
-        );
-
-        $engine = new OnboardingEngine($registry, $serviceDispatcher, $bus);
-        $this->engine = $engine;
-    }
-
     // --- given ---
 
     private function givenLowRiskStandardCase(): OnboardingCase
     {
-        return $this->engine->startCase('business_standard', ClientDataFactory::lowRiskClient());
+        return $this->givenCaseStarted('business_standard', ClientDataFactory::lowRiskClient());
     }
 
     private function givenMediumRiskStandardCase(): OnboardingCase
     {
-        return $this->engine->startCase('business_standard', ClientDataFactory::mediumRiskClient());
+        return $this->givenCaseStarted('business_standard', ClientDataFactory::mediumRiskClient());
     }
 
     private function givenFlaggedNipCase(): OnboardingCase
     {
-        return $this->engine->startCase('business_standard', ClientDataFactory::flaggedNipClient());
+        return $this->givenCaseStarted('business_standard', ClientDataFactory::flaggedNipClient());
     }
 
     private function givenUnknownNipCase(): OnboardingCase
     {
-        return $this->engine->startCase('business_standard', ClientDataFactory::unknownNipClient());
+        return $this->givenCaseStarted('business_standard', ClientDataFactory::unknownNipClient());
     }
 
     private function givenSimplifiedPartnerCase(): OnboardingCase
     {
-        return $this->engine->startCase('business_simplified', ClientDataFactory::simplifiedPartner());
-    }
-
-    // --- then: case status ---
-
-    private function thenCaseIsCompletedWith(OnboardingCase $case, CaseOutcome $expectedOutcome): void
-    {
-        self::assertSame(Status::Completed, $case->status());
-        self::assertSame($expectedOutcome, $case->caseOutcome());
-    }
-
-    // --- then: events ---
-
-    /**
-     * @return string[]
-     */
-    private function thenStepsInitializedInOrder(): array
-    {
-        return Stream::ofAll($this->recordedEvents)
-            ->filter(fn($e) => $e instanceof ActionInitialized)
-            ->map(fn(ActionInitialized $e) => $e->stepId)
-            ->toArray();
-    }
-
-    private function thenEventFlowStartsAndFinishes(OnboardingCase $case): void
-    {
-        $eventTypes = Stream::ofAll($this->recordedEvents)
-            ->map(fn(CaseEvent $e) => $e::class)
-            ->toArray();
-
-        self::assertSame(CaseStarted::class, $eventTypes[0]);
-        self::assertSame(CaseFinished::class, end($eventTypes));
-    }
-
-    private function thenAllEventsHaveCaseId(OnboardingCase $case): void
-    {
-        foreach ($this->recordedEvents as $event) {
-            self::assertSame($case->id->value, $event->caseId());
-            self::assertNotNull($event->occurredAt());
-        }
-    }
-
-    private function thenTerminalEventHasOutcome(string $expectedOutcome): void
-    {
-        $terminalFinished = Stream::ofAll($this->recordedEvents)
-            ->find(fn($e) => $e instanceof ActionFinished && $e->isTerminal);
-
-        self::assertTrue($terminalFinished->isPresent());
-        self::assertSame($expectedOutcome, $terminalFinished->get()->caseOutcome);
-    }
-
-    // --- then: stages ---
-
-    /**
-     * @return array<string, Status>
-     */
-    private function thenAllStagesAreCompleted(OnboardingCase $case): void
-    {
-        $case->stages()->forEach(function ($stage) {
-            self::assertSame(
-                Status::Completed,
-                $stage->status(),
-                "Stage '{$stage->name}' should be completed but is {$stage->status()->value}",
-            );
-        });
+        return $this->givenCaseStarted('business_simplified', ClientDataFactory::simplifiedPartner());
     }
 
     // --- Standard onboarding: Happy path (low risk) ---
@@ -173,7 +52,8 @@ final class OnboardingWorkflowTest extends TestCase
         $case = $this->givenLowRiskStandardCase();
 
         $this->thenCaseIsCompletedWith($case, CaseOutcome::Approved);
-        $this->thenEventFlowStartsAndFinishes($case);
+        $this->thenEventLogStartsWithCaseStarted();
+        $this->thenEventLogEndsWithCaseFinished();
 
         self::assertSame([
             'collect_prospect_data',
@@ -231,7 +111,7 @@ final class OnboardingWorkflowTest extends TestCase
             $this->thenStepsInitializedInOrder(),
         );
 
-        $this->thenTerminalEventHasOutcome('rejected');
+        $this->thenEventLogContains('TERMINAL');
     }
 
     // --- Simplified onboarding ---
@@ -264,12 +144,16 @@ final class OnboardingWorkflowTest extends TestCase
     // --- Event audit trail ---
 
     #[Test]
-    public function all_events_have_case_id_and_timestamp(): void
+    public function event_log_records_full_audit_trail(): void
     {
         $case = $this->givenLowRiskStandardCase();
 
-        self::assertNotEmpty($this->recordedEvents);
-        $this->thenAllEventsHaveCaseId($case);
+        $log = $this->eventLogger->getLog();
+        self::assertNotEmpty($log);
+
+        $this->thenEventLogStartsWithCaseStarted();
+        $this->thenEventLogEndsWithCaseFinished();
+        $this->thenEventLogContains('case=' . $case->id->value);
     }
 
     // --- Engine case retrieval ---

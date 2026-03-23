@@ -1,0 +1,7 @@
+framework:
+    test: true
+    secret: 'test-secret'
+    http_method_override: false
+    handle_all_throwables: true
+    php_errors:
+        log: false
