@@ -101,14 +101,14 @@ foreach ($logger->getLog() as $entry) {
 echo "\n" . str_repeat('─', 60) . "\n";
 echo "Case ID: {$case->id}\n";
 echo "Final status: {$case->status()->value}\n";
-echo "Case outcome: {$case->caseOutcome()}\n";
+echo "Case outcome: {$case->caseOutcome()?->value}\n";
 
 // --- 7. Print stage summary ---
 echo "\nStage Summary:\n";
-foreach ($case->stages() as $stage) {
+$case->stages()->forEach(function ($stage) {
     echo "  [{$stage->status()->value}] {$stage->name}\n";
-    foreach ($stage->steps() as $step) {
+    $stage->steps()->forEach(function ($step) {
         $outcomeStr = $step->outcome() ? " → {$step->outcome()->value}" : '';
         echo "    [{$step->status()->value}] {$step->name}{$outcomeStr}\n";
-    }
-}
+    });
+});

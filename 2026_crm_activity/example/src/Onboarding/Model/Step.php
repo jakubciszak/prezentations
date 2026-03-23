@@ -24,10 +24,9 @@ final class Step
     private StepState $state;
 
     public function __construct(
-        public readonly string $stepId,
+        public readonly StepId $stepId,
         public readonly string $name,
-        public readonly string $service,
-        public readonly string $action,
+        public readonly ServiceAction $serviceAction,
     ) {
         $this->state = new InitializedState();
     }

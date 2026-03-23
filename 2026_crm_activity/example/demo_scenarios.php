@@ -66,7 +66,8 @@ function runScenario(string $title, string $clientType, array $clientData): void
         echo $entry . "\n";
     }
 
-    echo "\n→ Case outcome: {$case->caseOutcome()} (status: {$case->status()->value})\n";
+    $outcome = $case->caseOutcome()?->value ?? 'none';
+    echo "\n→ Case outcome: {$outcome} (status: {$case->status()->value})\n";
 }
 
 // Scenario 1: Low risk, clean NIP → basic documents → approved

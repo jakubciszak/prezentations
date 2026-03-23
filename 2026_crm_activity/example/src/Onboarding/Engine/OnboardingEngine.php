@@ -5,11 +5,10 @@ declare(strict_types=1);
 namespace App\Onboarding\Engine;
 
 use App\ExternalService\ServiceDispatcher;
-use App\Onboarding\Event\ActionInitialized;
-use App\Onboarding\Event\CaseEvent;
 use App\Onboarding\Model\OnboardingCase;
 use App\Onboarding\Model\Outcome;
 use App\Onboarding\Model\Status;
+use App\Onboarding\Model\StepId;
 use App\Onboarding\Template\TemplateRegistry;
 use Symfony\Component\Messenger\MessageBusInterface;
 
@@ -60,7 +59,7 @@ final class OnboardingEngine
         $case = $this->cases[$caseId]
             ?? throw new \InvalidArgumentException("Case not found: {$caseId}");
 
-        $case->handleStepOutcome($stepId, new Outcome($outcome, $metadata));
+        $case->handleStepOutcome(new StepId($stepId), new Outcome($outcome, $metadata));
 
         // Publish events and trigger next step if case is still active
         $this->publishAndDispatch($case);
@@ -81,16 +80,16 @@ final class OnboardingEngine
 
         // If the case is still pending, dispatch the current step to external service
         if ($case->status() === Status::Pending && $case->currentStepId() !== null) {
-            $stepDef = $case->template->findStep($case->currentStepId());
+            $stepDef = $case->template->findStep($case->currentStepId()->value);
 
             // Only dispatch if step was just initialized (last event is ActionPending for this step)
             $lastEvent = end($events);
             if ($lastEvent instanceof \App\Onboarding\Event\ActionPending
-                && $lastEvent->stepId === $case->currentStepId()
+                && $lastEvent->stepId === $case->currentStepId()->value
             ) {
                 $this->serviceDispatcher->dispatch(
                     caseId: $case->id->value,
-                    stepId: $case->currentStepId(),
+                    stepId: $case->currentStepId()->value,
                     service: $stepDef->service,
                     action: $stepDef->action,
                     context: $case->clientData,

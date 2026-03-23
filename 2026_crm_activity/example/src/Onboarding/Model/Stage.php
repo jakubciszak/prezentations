@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Onboarding\Model;
 
+use Munus\Collection\Stream;
+use Munus\Control\Option;
+
 /** Communication - a phase of the onboarding process containing Steps (Activities) */
 final class Stage
 {
@@ -12,10 +15,10 @@ final class Stage
     /** @var array<string, Step> */
     private array $steps = [];
 
-    private ?string $currentStepId = null;
+    private ?StepId $currentStepId = null;
 
     public function __construct(
-        public readonly string $stageId,
+        public readonly StageId $stageId,
         public readonly string $name,
     ) {
         $this->status = Status::Initialized;
@@ -23,12 +26,14 @@ final class Stage
 
     public function addStep(Step $step): void
     {
-        $this->steps[$step->stepId] = $step;
+        $this->steps[$step->stepId->value] = $step;
     }
 
-    public function startStep(string $stepId): Step
+    public function startStep(StepId $stepId): Step
     {
-        $step = $this->steps[$stepId] ?? throw new \InvalidArgumentException("Step {$stepId} not found in stage {$this->stageId}");
+        $step = $this->getStep($stepId)
+            ->getOrElseThrow(new \InvalidArgumentException("Step {$stepId} not found in stage {$this->stageId}"));
+
         $step->markPending();
         $this->currentStepId = $stepId;
 
@@ -41,12 +46,22 @@ final class Stage
 
     public function currentStep(): ?Step
     {
-        return $this->currentStepId ? $this->steps[$this->currentStepId] : null;
+        return $this->currentStepId
+            ? $this->getStep($this->currentStepId)->getOrNull()
+            : null;
     }
 
-    public function getStep(string $stepId): ?Step
+    /**
+     * @return Option<Step>
+     */
+    public function getStep(StepId $stepId): Option
     {
-        return $this->steps[$stepId] ?? null;
+        return Option::of($this->steps[$stepId->value] ?? null);
+    }
+
+    public function hasStep(StepId $stepId): bool
+    {
+        return isset($this->steps[$stepId->value]);
     }
 
     public function markCompleted(): void
@@ -59,9 +74,11 @@ final class Stage
         return $this->status;
     }
 
-    /** @return array<string, Step> */
-    public function steps(): array
+    /**
+     * @return Stream<Step>
+     */
+    public function steps(): Stream
     {
-        return $this->steps;
+        return Stream::ofAll(array_values($this->steps));
     }
 }
