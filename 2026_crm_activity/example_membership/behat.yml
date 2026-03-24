@@ -5,6 +5,3 @@ default:
                 - '%paths.base%/features/membership'
             contexts:
                 - Features\Bootstrap\MembershipContext
-                - Features\Bootstrap\PointsContext
-                - Features\Bootstrap\TierContext
-                - Features\Bootstrap\EventContext

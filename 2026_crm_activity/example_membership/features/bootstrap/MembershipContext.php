@@ -4,15 +4,12 @@ declare(strict_types=1);
 
 namespace Features\Bootstrap;
 
-use App\Kernel;
-use App\Membership\Engine\MembershipEngine;
-use App\Membership\Handler\CaseEventLogger;
-use App\Membership\Model\CaseRepository;
-use App\Points\Model\PointsAccount;
-use App\Points\Model\PointsAccountRepository;
+use App\Infrastructure\InMemoryRewardCatalog;
+use App\Membership\Model\MemberAccount;
+use App\Membership\Model\MemberId;
+use App\Membership\Model\Points\InsufficientPointsException;
 use Behat\Behat\Context\Context;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
-use Behat\Gherkin\Node\TableNode;
 use Behat\Hook\BeforeScenario;
 use Behat\Step\Given;
 use Behat\Step\Then;
@@ -20,167 +17,120 @@ use Behat\Step\When;
 
 final class MembershipContext implements Context
 {
-    private SharedMembershipState $state;
-    private string $activityType;
+    private SharedState $state;
 
     public function __construct()
     {
-        $this->state = SharedMembershipState::getInstance();
+        $this->state = SharedState::getInstance();
     }
 
     #[BeforeScenario]
     public function resetState(BeforeScenarioScope $scope): void
     {
-        SharedMembershipState::reset();
-        $this->state = SharedMembershipState::getInstance();
+        SharedState::reset();
+        $this->state = SharedState::getInstance();
+        $this->state->rewardCatalog = new InMemoryRewardCatalog();
     }
 
-    #[Given('the :activityType activity template is loaded')]
-    public function theActivityTemplateIsLoaded(string $activityType): void
+    #[Given('a member :name with id :memberId')]
+    public function aMember(string $name, string $memberId): void
     {
-        $this->activityType = $activityType;
-
-        $kernel = new Kernel('test', true);
-        $kernel->boot();
-        $container = $kernel->getContainer();
-
-        $this->state->engine = $container->get(MembershipEngine::class);
-        $this->state->eventLogger = $container->get(CaseEventLogger::class);
-        $this->state->caseRepository = $container->get(CaseRepository::class);
-        $this->state->pointsAccountRepository = $container->get(PointsAccountRepository::class);
+        $this->state->currentAccount = MemberAccount::open(MemberId::from($memberId), $name);
     }
 
-    #[Given('a member :memberId with a purchase of :amount PLN at store :storeId')]
-    public function aMemberWithAPurchase(string $memberId, int $amount, string $storeId): void
+    #[Given('the member has earned :points points from purchases')]
+    public function theMemberHasEarnedPoints(int $points): void
     {
-        $this->state->activityData = [
-            'member_id' => $memberId,
-            'transaction_id' => 'TXN-' . uniqid(),
-            'amount' => $amount,
-            'currency' => 'PLN',
-            'store_id' => $storeId,
-        ];
+        $this->state->currentAccount->recordPurchase($points, 'PLN', 'SETUP-STORE', 'TXN-SETUP');
     }
 
-    #[Given('a member :memberId with an online purchase of :amount PLN')]
-    public function aMemberWithAnOnlinePurchase(string $memberId, int $amount): void
+    #[When('the member makes an in-store purchase of :amount PLN at store :storeId with transaction :txnId')]
+    public function theMemberMakesPurchase(int $amount, string $storeId, string $txnId): void
     {
-        $this->state->activityData = [
-            'member_id' => $memberId,
-            'transaction_id' => 'TXN-ONLINE-' . uniqid(),
-            'order_id' => 'ORD-' . uniqid(),
-            'amount' => $amount,
-            'currency' => 'PLN',
-        ];
+        $this->state->currentAccount->recordPurchase($amount, 'PLN', $storeId, $txnId);
     }
 
-    #[Given('a referral from member :referrerId for new member :referredId with code :code')]
-    public function aReferral(string $referrerId, string $referredId, string $code): void
+    #[When('the member makes an online purchase of :amount PLN with order :orderId')]
+    public function theMemberMakesOnlinePurchase(int $amount, string $orderId): void
     {
-        $this->state->activityData = [
-            'referrer_member_id' => $referrerId,
-            'referred_member_id' => $referredId,
-            'referral_code' => $code,
-        ];
+        $this->state->currentAccount->recordOnlinePurchase($amount, 'PLN', $orderId);
     }
 
-    #[Given('the member has :totalPoints total points on :tier tier')]
-    public function theMemberHasTotalPoints(int $totalPoints, string $tier): void
+    #[When('the package for order :orderId is delivered')]
+    public function thePackageIsDelivered(string $orderId): void
     {
-        $this->state->activityData['total_points'] = $totalPoints;
-        $this->state->activityData['current_tier'] = $tier;
+        $this->state->currentAccount->recordDelivery($orderId);
     }
 
-    #[Given('a member :memberId with :balance points balance')]
-    public function aMemberWithPointsBalance(string $memberId, int $balance): void
+    #[When('the member completes challenge :challengeId earning :points bonus points')]
+    public function theMemberCompletesChallenge(string $challengeId, int $points): void
     {
-        $this->state->activityData['member_id'] = $memberId;
-
-        $account = new PointsAccount($memberId, $balance);
-        $this->state->pointsAccountRepository->save($account);
+        $this->state->currentAccount->recordChallengeCompleted($challengeId, $points);
     }
 
-    #[Given('the member wants to redeem reward :rewardId costing :cost points')]
-    public function theMemberWantsToRedeemReward(string $rewardId, int $cost): void
+    #[When('the member receives a birthday bonus of :points points')]
+    public function theMemberReceivesBirthdayBonus(int $points): void
     {
-        $this->state->activityData['reward_id'] = $rewardId;
-        $this->state->activityData['reward_points_cost'] = $cost;
+        $this->state->currentAccount->recordBirthdayBonus($points);
     }
 
-    #[Then('the member :memberId should have :balance points remaining')]
-    public function theMemberShouldHavePointsRemaining(string $memberId, int $balance): void
+    #[When('the member redeems reward :rewardId')]
+    public function theMemberRedeemsReward(string $rewardId): void
     {
-        $account = $this->state->pointsAccountRepository->findByMemberId($memberId);
-        assert($account !== null, "No points account found for member '{$memberId}'");
-        assert(
-            $account->balance() === $balance,
-            "Member '{$memberId}' has {$account->balance()} points, expected {$balance}",
-        );
+        $reward = $this->state->rewardCatalog->findById($rewardId);
+        assert($reward !== null, "Reward '{$rewardId}' not found in catalog");
+        $this->state->currentAccount->redeemReward($reward);
     }
 
-    #[When('the loyalty activity is started')]
-    public function theLoyaltyActivityIsStarted(): void
+    #[Then('the member should have :points active points')]
+    public function theMemberShouldHaveActivePoints(int $points): void
     {
-        $this->state->currentCase = $this->state->engine->startCase(
-            $this->activityType,
-            $this->state->activityData,
-        );
-
-        $this->parseEventLog();
+        $actual = $this->state->currentAccount->activeBalance();
+        assert($actual === $points, "Expected {$points} active points, got {$actual}");
     }
 
-    #[Then('the case should be completed with outcome :outcome')]
-    public function theCaseShouldBeCompletedWithOutcome(string $outcome): void
+    #[Then('the member should have :points pending points')]
+    public function theMemberShouldHavePendingPoints(int $points): void
     {
-        $case = $this->state->currentCase;
-        assert($case !== null, 'No case started');
-        assert($case->status()->value === 'completed', "Case status is '{$case->status()->value}', expected 'completed'");
-        assert($case->caseOutcome()?->value === $outcome, "Case outcome is '{$case->caseOutcome()?->value}', expected '{$outcome}'");
+        $actual = $this->state->currentAccount->pendingBalance();
+        assert($actual === $points, "Expected {$points} pending points, got {$actual}");
     }
 
-    #[Then('the following steps should have been executed in order:')]
-    public function theFollowingStepsShouldHaveBeenExecutedInOrder(TableNode $table): void
+    #[Then('the last activity should be of type :type')]
+    public function theLastActivityShouldBeOfType(string $type): void
     {
-        $expected = array_column($table->getHash(), 'step');
-        $actual = $this->state->initializedSteps;
-
-        assert($actual === $expected, sprintf(
-            "Steps order mismatch.\nExpected: %s\nActual:   %s",
-            implode(' → ', $expected),
-            implode(' → ', $actual),
-        ));
+        $activities = $this->state->currentAccount->activities();
+        $last = end($activities);
+        assert($last !== false, 'No activities recorded');
+        assert($last->type->value === $type, "Expected type '{$type}', got '{$last->type->value}'");
     }
 
-    #[Then('the step :stepId should have been executed')]
-    public function theStepShouldHaveBeenExecuted(string $stepId): void
+    #[Then('the member should have :count activities recorded')]
+    public function theMemberShouldHaveActivitiesRecorded(int $count): void
     {
-        assert(
-            in_array($stepId, $this->state->initializedSteps, true),
-            "Step '{$stepId}' was not executed. Executed steps: " . implode(', ', $this->state->initializedSteps),
-        );
+        $actual = count($this->state->currentAccount->activities());
+        assert($actual === $count, "Expected {$count} activities, got {$actual}");
     }
 
-    #[Then('the step :stepId should not have been executed')]
-    public function theStepShouldNotHaveBeenExecuted(string $stepId): void
+    #[Then('the member should have :count redemption')]
+    #[Then('the member should have :count redemptions')]
+    public function theMemberShouldHaveRedemptions(int $count): void
     {
-        assert(
-            !in_array($stepId, $this->state->initializedSteps, true),
-            "Step '{$stepId}' was executed but should not have been",
-        );
+        $actual = count($this->state->currentAccount->redemptions());
+        assert($actual === $count, "Expected {$count} redemptions, got {$actual}");
     }
 
-    private function parseEventLog(): void
+    #[Then('redeeming reward :rewardId should fail with insufficient points')]
+    public function redeemingRewardShouldFail(string $rewardId): void
     {
-        $this->state->initializedSteps = [];
-        $this->state->stepOutcomes = [];
+        $reward = $this->state->rewardCatalog->findById($rewardId);
+        assert($reward !== null, "Reward '{$rewardId}' not found in catalog");
 
-        foreach ($this->state->eventLogger->getLog() as $line) {
-            if (str_contains($line, '[ACTION INIT]') && preg_match('/step=(\S+)/', $line, $m)) {
-                $this->state->initializedSteps[] = $m[1];
-            }
-            if (str_contains($line, '[ACTION DONE]') && preg_match('/step=(\S+)\s+outcome=(\S+)/', $line, $m)) {
-                $this->state->stepOutcomes[$m[1]] = $m[2];
-            }
+        try {
+            $this->state->currentAccount->redeemReward($reward);
+            assert(false, 'Expected InsufficientPointsException was not thrown');
+        } catch (InsufficientPointsException) {
+            // expected
         }
     }
 }

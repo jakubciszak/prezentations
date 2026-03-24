@@ -1,49 +1,15 @@
-parameters:
-    templates_dir: '%kernel.project_dir%/config/templates'
-
 services:
     _defaults:
         autowire: true
         autoconfigure: true
         public: true
 
-    # --- Infrastructure ---
-    App\Infrastructure\YamlTemplateLoader:
-        arguments:
-            $templatesDir: '%templates_dir%'
+    # --- Repositories ---
+    App\Membership\Model\MemberAccountRepository:
+        class: App\Infrastructure\InMemoryMemberAccountRepository
 
-    App\Membership\Template\TemplateRegistry:
-        factory: ['@App\Infrastructure\YamlTemplateLoader', 'loadAll']
-
-    # --- Points Context (Accounting archetype) ---
-    App\Points\Model\PointsAccountRepository:
-        class: App\Infrastructure\InMemoryPointsAccountRepository
-
-    App\Points\Service\PointsService: ~
-
-    # --- Rewards Context ---
-    App\Rewards\Model\RewardCatalog:
+    App\Membership\Model\Reward\RewardCatalog:
         class: App\Infrastructure\InMemoryRewardCatalog
 
-    App\Rewards\Model\RedemptionRepository:
-        class: App\Infrastructure\InMemoryRedemptionRepository
-
-    App\Rewards\Service\RewardService: ~
-
-    # --- External Service Stubs (remaining stubs) ---
-    App\ExternalService\TransactionServiceStub: ~
-    App\ExternalService\TierServiceStub: ~
-    App\ExternalService\NotificationServiceStub: ~
-    App\ExternalService\ServiceDispatcher: ~
-
-    # --- Repository ---
-    App\Membership\Model\CaseRepository:
-        class: App\Infrastructure\InMemoryCaseRepository
-
-    # --- Membership Engine ---
-    App\Membership\Engine\TransitionResolver: ~
-    App\Membership\Engine\MembershipEngine: ~
-
     # --- Event Handlers ---
-    App\Membership\Handler\CaseEventLogger: ~
-    App\Membership\Handler\ExternalServiceResponseHandler: ~
+    App\Membership\Handler\EventLogger: ~
