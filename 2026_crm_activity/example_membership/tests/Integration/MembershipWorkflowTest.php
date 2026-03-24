@@ -6,6 +6,8 @@ namespace Tests\Integration;
 
 use App\Membership\Model\CaseOutcome;
 use App\Membership\Model\MembershipCase;
+use App\Points\Model\EntryType;
+use App\Points\Model\PointsAccount;
 use Tests\Factory\MemberDataFactory;
 use PHPUnit\Framework\Attributes\Test;
 
@@ -250,5 +252,142 @@ final class MembershipWorkflowTest extends IntegrationTestCase
     public function repository_returns_null_for_unknown_case(): void
     {
         self::assertNull($this->caseRepository->findById('nonexistent'));
+    }
+
+    // --- Points Accounting: Ledger entries are created ---
+
+    #[Test]
+    public function purchase_creates_earn_entry_in_points_account(): void
+    {
+        $case = $this->givenStandardInStorePurchase();
+
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::PointsAwarded);
+
+        $account = $this->pointsAccountRepository->findByMemberId('MBR-001');
+        self::assertNotNull($account);
+
+        $earnEntries = $account->entriesOfType(EntryType::Earn);
+        self::assertNotEmpty($earnEntries);
+        self::assertSame(150, $earnEntries[0]->amount);
+    }
+
+    #[Test]
+    public function online_purchase_creates_base_and_bonus_entries(): void
+    {
+        $case = $this->givenOnlinePurchase();
+
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::PointsAwarded);
+
+        $account = $this->pointsAccountRepository->findByMemberId('MBR-010');
+        self::assertNotNull($account);
+
+        $earnEntries = $account->entriesOfType(EntryType::Earn);
+        $bonusEntries = $account->entriesOfType(EntryType::BonusEarn);
+        self::assertCount(1, $earnEntries);
+        self::assertCount(1, $bonusEntries);
+        self::assertSame(200, $earnEntries[0]->amount);
+        self::assertSame(100, $bonusEntries[0]->amount);
+    }
+
+    #[Test]
+    public function referral_creates_bonus_entries_for_both_members(): void
+    {
+        $case = $this->givenValidReferral();
+
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::PointsAwarded);
+
+        $referrerAccount = $this->pointsAccountRepository->findByMemberId('MBR-020');
+        $referredAccount = $this->pointsAccountRepository->findByMemberId('MBR-021');
+
+        self::assertNotNull($referrerAccount);
+        self::assertNotNull($referredAccount);
+        self::assertSame(500, $referrerAccount->totalEarned());
+        self::assertSame(200, $referredAccount->totalEarned());
+    }
+
+    // --- Reward Redemption: Happy path ---
+
+    #[Test]
+    public function member_redeems_reward_successfully(): void
+    {
+        // Pre-create account with sufficient balance
+        $account = new PointsAccount('MBR-100', 5_000);
+        $this->pointsAccountRepository->save($account);
+
+        $case = $this->givenCaseStarted('reward_redemption', MemberDataFactory::rewardRedemption());
+
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::RewardRedeemed);
+
+        self::assertSame([
+            'validate_reward',
+            'check_balance',
+            'debit_points',
+            'issue_reward',
+        ], $this->thenStepsInitializedInOrder());
+
+        // Verify points were debited
+        $updatedAccount = $this->pointsAccountRepository->getByMemberId('MBR-100');
+        self::assertSame(4_000, $updatedAccount->balance());
+
+        $spendEntries = $updatedAccount->entriesOfType(EntryType::Spend);
+        self::assertCount(1, $spendEntries);
+        self::assertSame(-1_000, $spendEntries[0]->amount);
+
+        // Verify redemption was created
+        $redemptions = $this->redemptionRepository->findByMemberId('MBR-100');
+        self::assertCount(1, $redemptions);
+        self::assertSame('RWD-10PCT', $redemptions[0]->reward->id);
+    }
+
+    // --- Reward Redemption: Insufficient balance ---
+
+    #[Test]
+    public function redemption_rejected_when_insufficient_balance(): void
+    {
+        // Pre-create account with insufficient balance
+        $account = new PointsAccount('MBR-101', 100);
+        $this->pointsAccountRepository->save($account);
+
+        $case = $this->givenCaseStarted('reward_redemption', MemberDataFactory::expensiveRewardRedemption());
+
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Rejected);
+
+        self::assertSame([
+            'validate_reward',
+            'check_balance',
+        ], $this->thenStepsInitializedInOrder());
+
+        // Balance unchanged
+        self::assertSame(100, $this->pointsAccountRepository->getByMemberId('MBR-101')->balance());
+    }
+
+    // --- Reward Redemption: Unavailable reward ---
+
+    #[Test]
+    public function redemption_rejected_for_nonexistent_reward(): void
+    {
+        $case = $this->givenCaseStarted('reward_redemption', MemberDataFactory::unavailableRewardRedemption());
+
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Rejected);
+
+        self::assertSame(
+            ['validate_reward'],
+            $this->thenStepsInitializedInOrder(),
+        );
+    }
+
+    // --- Reward Redemption: Inactive reward ---
+
+    #[Test]
+    public function redemption_rejected_for_inactive_reward(): void
+    {
+        $case = $this->givenCaseStarted('reward_redemption', MemberDataFactory::inactiveRewardRedemption());
+
+        $this->thenCaseIsCompletedWith($case, CaseOutcome::Rejected);
+
+        self::assertSame(
+            ['validate_reward'],
+            $this->thenStepsInitializedInOrder(),
+        );
     }
 }

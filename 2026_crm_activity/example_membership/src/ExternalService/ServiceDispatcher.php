@@ -4,17 +4,23 @@ declare(strict_types=1);
 
 namespace App\ExternalService;
 
+use App\Points\Service\PointsService;
+use App\Rewards\Service\RewardService;
+
 /**
- * Routes step execution to the appropriate external service stub.
- * In production, this could dispatch async messages to real services.
+ * Routes step execution to the appropriate service.
+ *
+ * Points and Rewards are backed by real domain models (Accounting archetype
+ * for Points, catalog + redemptions for Rewards). Transaction, Tier, and
+ * Notification remain as stubs.
  */
 final readonly class ServiceDispatcher
 {
     public function __construct(
         private TransactionServiceStub $transaction,
-        private PointsServiceStub $points,
+        private PointsService $points,
         private TierServiceStub $tier,
-        private RewardServiceStub $reward,
+        private RewardService $reward,
         private NotificationServiceStub $notification,
     ) {}
 
@@ -36,6 +42,9 @@ final readonly class ServiceDispatcher
                 'calculate' => $this->points->calculate($caseId, $stepId, $context),
                 'calculate_with_bonus' => $this->points->calculateWithBonus($caseId, $stepId, $context),
                 'calculate_referral_bonus' => $this->points->calculateReferralBonus($caseId, $stepId, $context),
+                'check_balance' => $this->points->checkBalance($caseId, $stepId, $context),
+                'debit' => $this->points->debit($caseId, $stepId, $context),
+                'refund' => $this->points->refund($caseId, $stepId, $context),
             },
             'tier' => match ($action) {
                 'evaluate' => $this->tier->evaluate($caseId, $stepId, $context),
@@ -45,6 +54,8 @@ final readonly class ServiceDispatcher
             },
             'reward' => match ($action) {
                 'assign' => $this->reward->assign($caseId, $stepId, $context),
+                'validate_availability' => $this->reward->validateAvailability($caseId, $stepId, $context),
+                'issue' => $this->reward->issue($caseId, $stepId, $context),
             },
             'notification' => match ($action) {
                 'send_referral_notification' => $this->notification->sendReferralNotification($caseId, $stepId, $context),

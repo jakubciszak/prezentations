@@ -8,6 +8,7 @@ use App\Membership\Engine\MembershipEngine;
 use App\Membership\Handler\CaseEventLogger;
 use App\Membership\Model\CaseRepository;
 use App\Membership\Model\MembershipCase;
+use App\Points\Model\PointsAccountRepository;
 
 final class SharedMembershipState
 {
@@ -16,6 +17,7 @@ final class SharedMembershipState
     public MembershipEngine $engine;
     public CaseEventLogger $eventLogger;
     public CaseRepository $caseRepository;
+    public PointsAccountRepository $pointsAccountRepository;
     public ?MembershipCase $currentCase = null;
     public array $activityData = [];
 

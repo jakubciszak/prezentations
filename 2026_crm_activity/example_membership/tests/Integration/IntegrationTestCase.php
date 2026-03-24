@@ -10,6 +10,9 @@ use App\Membership\Model\CaseOutcome;
 use App\Membership\Model\CaseRepository;
 use App\Membership\Model\MembershipCase;
 use App\Membership\Model\Status;
+use App\Points\Model\PointsAccountRepository;
+use App\Rewards\Model\RedemptionRepository;
+use App\Rewards\Model\RewardCatalog;
 use Munus\Collection\Stream;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -18,6 +21,9 @@ abstract class IntegrationTestCase extends KernelTestCase
     protected MembershipEngine $engine;
     protected CaseEventLogger $eventLogger;
     protected CaseRepository $caseRepository;
+    protected PointsAccountRepository $pointsAccountRepository;
+    protected RewardCatalog $rewardCatalog;
+    protected RedemptionRepository $redemptionRepository;
 
     protected function setUp(): void
     {
@@ -28,6 +34,9 @@ abstract class IntegrationTestCase extends KernelTestCase
         $this->engine = $container->get(MembershipEngine::class);
         $this->eventLogger = $container->get(CaseEventLogger::class);
         $this->caseRepository = $container->get(CaseRepository::class);
+        $this->pointsAccountRepository = $container->get(PointsAccountRepository::class);
+        $this->rewardCatalog = $container->get(RewardCatalog::class);
+        $this->redemptionRepository = $container->get(RedemptionRepository::class);
     }
 
     protected function tearDown(): void

@@ -123,4 +123,40 @@ final class MemberDataFactory
             'referral_code' => 'INV-EXPIRED',
         ], $overrides);
     }
+
+    public static function rewardRedemption(array $overrides = []): array
+    {
+        return array_merge([
+            'member_id' => 'MBR-100',
+            'reward_id' => 'RWD-10PCT',
+            'reward_points_cost' => 1_000,
+        ], $overrides);
+    }
+
+    public static function expensiveRewardRedemption(array $overrides = []): array
+    {
+        return array_merge([
+            'member_id' => 'MBR-101',
+            'reward_id' => 'RWD-VIP',
+            'reward_points_cost' => 15_000,
+        ], $overrides);
+    }
+
+    public static function unavailableRewardRedemption(array $overrides = []): array
+    {
+        return array_merge([
+            'member_id' => 'MBR-102',
+            'reward_id' => 'RWD-NONEXISTENT',
+            'reward_points_cost' => 100,
+        ], $overrides);
+    }
+
+    public static function inactiveRewardRedemption(array $overrides = []): array
+    {
+        return array_merge([
+            'member_id' => 'MBR-103',
+            'reward_id' => 'RWD-INACTIVE',
+            'reward_points_cost' => 100,
+        ], $overrides);
+    }
 }

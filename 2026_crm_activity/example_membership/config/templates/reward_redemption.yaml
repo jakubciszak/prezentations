@@ -1,0 +1,73 @@
+name: "Reward Redemption"
+version: 1
+client_type: reward_redemption
+description: "Loyalty activity flow for exchanging points for rewards"
+
+# A member exchanges accumulated points for a reward from the catalog.
+# The flow validates the reward, checks the points balance, debits points,
+# and issues the reward. If issuing fails, points are automatically refunded.
+
+stages:
+  - id: redemption_validation
+    name: "Redemption Validation"
+    steps:
+      - id: validate_reward
+        name: "Validate Reward Availability"
+        service: reward
+        action: validate_availability
+        participants:
+          - role: customer
+        required_metadata:
+          - member_id
+          - reward_id
+        outcomes:
+          available:
+            next_step: check_balance
+          unavailable:
+            terminal: true
+            case_outcome: rejected
+
+      - id: check_balance
+        name: "Check Points Balance"
+        service: points
+        action: check_balance
+        outcomes:
+          sufficient:
+            next_step: debit_points
+          insufficient:
+            terminal: true
+            case_outcome: rejected
+
+  - id: redemption_processing
+    name: "Redemption Processing"
+    steps:
+      - id: debit_points
+        name: "Debit Points from Account"
+        service: points
+        action: debit
+        outcomes:
+          debited:
+            next_step: issue_reward
+          insufficient:
+            terminal: true
+            case_outcome: rejected
+
+      - id: issue_reward
+        name: "Issue Reward to Member"
+        service: reward
+        action: issue
+        outcomes:
+          issued:
+            terminal: true
+            case_outcome: reward_redeemed
+          issue_failed:
+            next_step: refund_points
+
+      - id: refund_points
+        name: "Refund Points (Compensation)"
+        service: points
+        action: refund
+        outcomes:
+          refunded:
+            terminal: true
+            case_outcome: rejected

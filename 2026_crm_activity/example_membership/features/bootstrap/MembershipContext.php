@@ -8,6 +8,8 @@ use App\Kernel;
 use App\Membership\Engine\MembershipEngine;
 use App\Membership\Handler\CaseEventLogger;
 use App\Membership\Model\CaseRepository;
+use App\Points\Model\PointsAccount;
+use App\Points\Model\PointsAccountRepository;
 use Behat\Behat\Context\Context;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
 use Behat\Gherkin\Node\TableNode;
@@ -45,6 +47,7 @@ final class MembershipContext implements Context
         $this->state->engine = $container->get(MembershipEngine::class);
         $this->state->eventLogger = $container->get(CaseEventLogger::class);
         $this->state->caseRepository = $container->get(CaseRepository::class);
+        $this->state->pointsAccountRepository = $container->get(PointsAccountRepository::class);
     }
 
     #[Given('a member :memberId with a purchase of :amount PLN at store :storeId')]
@@ -86,6 +89,33 @@ final class MembershipContext implements Context
     {
         $this->state->activityData['total_points'] = $totalPoints;
         $this->state->activityData['current_tier'] = $tier;
+    }
+
+    #[Given('a member :memberId with :balance points balance')]
+    public function aMemberWithPointsBalance(string $memberId, int $balance): void
+    {
+        $this->state->activityData['member_id'] = $memberId;
+
+        $account = new PointsAccount($memberId, $balance);
+        $this->state->pointsAccountRepository->save($account);
+    }
+
+    #[Given('the member wants to redeem reward :rewardId costing :cost points')]
+    public function theMemberWantsToRedeemReward(string $rewardId, int $cost): void
+    {
+        $this->state->activityData['reward_id'] = $rewardId;
+        $this->state->activityData['reward_points_cost'] = $cost;
+    }
+
+    #[Then('the member :memberId should have :balance points remaining')]
+    public function theMemberShouldHavePointsRemaining(string $memberId, int $balance): void
+    {
+        $account = $this->state->pointsAccountRepository->findByMemberId($memberId);
+        assert($account !== null, "No points account found for member '{$memberId}'");
+        assert(
+            $account->balance() === $balance,
+            "Member '{$memberId}' has {$account->balance()} points, expected {$balance}",
+        );
     }
 
     #[When('the loyalty activity is started')]
