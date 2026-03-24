@@ -8,5 +8,3 @@ default:
                 - Features\Bootstrap\VerificationContext
                 - Features\Bootstrap\DocumentContext
                 - Features\Bootstrap\EventContext
-
-    extensions: {}

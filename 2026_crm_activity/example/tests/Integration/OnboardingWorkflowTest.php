@@ -156,20 +156,20 @@ final class OnboardingWorkflowTest extends IntegrationTestCase
         $this->thenEventLogContains('case=' . $case->id->value);
     }
 
-    // --- Engine case retrieval ---
+    // --- Repository case retrieval ---
 
     #[Test]
-    public function engine_stores_and_retrieves_cases(): void
+    public function repository_stores_and_retrieves_cases(): void
     {
         $case = $this->givenLowRiskStandardCase();
 
-        $retrieved = $this->engine->getCase($case->id->value);
+        $retrieved = $this->caseRepository->findById($case->id->value);
         self::assertSame($case, $retrieved);
     }
 
     #[Test]
-    public function engine_returns_null_for_unknown_case(): void
+    public function repository_returns_null_for_unknown_case(): void
     {
-        self::assertNull($this->engine->getCase('nonexistent'));
+        self::assertNull($this->caseRepository->findById('nonexistent'));
     }
 }

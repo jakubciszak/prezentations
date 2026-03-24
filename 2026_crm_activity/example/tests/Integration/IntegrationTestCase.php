@@ -5,31 +5,19 @@ declare(strict_types=1);
 namespace Tests\Integration;
 
 use App\Onboarding\Engine\OnboardingEngine;
-use App\Onboarding\Event\ActionFinished;
-use App\Onboarding\Event\ActionInitialized;
-use App\Onboarding\Event\CaseEvent;
-use App\Onboarding\Event\CaseFinished;
-use App\Onboarding\Event\CaseStarted;
 use App\Onboarding\Handler\CaseEventLogger;
 use App\Onboarding\Model\CaseOutcome;
+use App\Onboarding\Model\CaseRepository;
 use App\Onboarding\Model\OnboardingCase;
 use App\Onboarding\Model\Status;
 use Munus\Collection\Stream;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
-/**
- * Base class for integration tests.
- *
- * Boots the Symfony Kernel, provides access to the DI container,
- * and offers shared given/when/then helpers for onboarding workflows.
- *
- * Extend this class for all integration tests that need the full
- * service stack (engine, messenger, handlers, service stubs).
- */
 abstract class IntegrationTestCase extends KernelTestCase
 {
     protected OnboardingEngine $engine;
     protected CaseEventLogger $eventLogger;
+    protected CaseRepository $caseRepository;
 
     protected function setUp(): void
     {
@@ -39,6 +27,7 @@ abstract class IntegrationTestCase extends KernelTestCase
 
         $this->engine = $container->get(OnboardingEngine::class);
         $this->eventLogger = $container->get(CaseEventLogger::class);
+        $this->caseRepository = $container->get(CaseRepository::class);
     }
 
     protected function tearDown(): void
@@ -47,14 +36,14 @@ abstract class IntegrationTestCase extends KernelTestCase
         restore_exception_handler();
     }
 
-    // ========== given: case creation ==========
+    // ========== given ==========
 
     protected function givenCaseStarted(string $clientType, array $clientData): OnboardingCase
     {
         return $this->engine->startCase($clientType, $clientData);
     }
 
-    // ========== then: case assertions ==========
+    // ========== then: case ==========
 
     protected function thenCaseIsCompletedWith(OnboardingCase $case, CaseOutcome $expectedOutcome): void
     {
@@ -67,11 +56,9 @@ abstract class IntegrationTestCase extends KernelTestCase
         self::assertSame($expected, $case->status());
     }
 
-    // ========== then: event assertions ==========
+    // ========== then: events ==========
 
-    /**
-     * @return string[] step IDs in order of initialization
-     */
+    /** @return string[] */
     protected function thenStepsInitializedInOrder(): array
     {
         return Stream::ofAll($this->eventLogger->getLog())
@@ -105,7 +92,7 @@ abstract class IntegrationTestCase extends KernelTestCase
         self::assertStringContainsString('[CASE FINISHED]', end($log));
     }
 
-    // ========== then: stage assertions ==========
+    // ========== then: stages ==========
 
     protected function thenAllStagesAreCompleted(OnboardingCase $case): void
     {
@@ -118,9 +105,7 @@ abstract class IntegrationTestCase extends KernelTestCase
         });
     }
 
-    /**
-     * @return array<string, Status>
-     */
+    /** @return array<string, Status> */
     protected function thenStageStatuses(OnboardingCase $case): array
     {
         $statuses = [];

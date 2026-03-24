@@ -6,27 +6,23 @@ namespace Features\Bootstrap;
 
 use App\Onboarding\Engine\OnboardingEngine;
 use App\Onboarding\Handler\CaseEventLogger;
+use App\Onboarding\Model\CaseRepository;
 use App\Onboarding\Model\OnboardingCase;
 
-/**
- * Shared state between Behat contexts.
- *
- * Behat creates separate context instances per scenario but they can share
- * state via a singleton holder. Each context accesses the same engine, case, etc.
- */
 final class SharedOnboardingState
 {
     private static ?self $instance = null;
 
     public OnboardingEngine $engine;
     public CaseEventLogger $eventLogger;
+    public CaseRepository $caseRepository;
     public ?OnboardingCase $currentCase = null;
     public array $clientData = [];
 
-    /** @var string[] step IDs that were initialized */
+    /** @var string[] */
     public array $initializedSteps = [];
 
-    /** @var array<string, string> step ID → outcome value */
+    /** @var array<string, string> */
     public array $stepOutcomes = [];
 
     private function __construct() {}

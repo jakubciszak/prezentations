@@ -7,6 +7,7 @@ namespace Features\Bootstrap;
 use App\Kernel;
 use App\Onboarding\Engine\OnboardingEngine;
 use App\Onboarding\Handler\CaseEventLogger;
+use App\Onboarding\Model\CaseRepository;
 use Behat\Behat\Context\Context;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
 use Behat\Gherkin\Node\TableNode;
@@ -43,6 +44,7 @@ final class OnboardingContext implements Context
 
         $this->state->engine = $container->get(OnboardingEngine::class);
         $this->state->eventLogger = $container->get(CaseEventLogger::class);
+        $this->state->caseRepository = $container->get(CaseRepository::class);
     }
 
     #[Given('a client :companyName with NIP :nip')]
