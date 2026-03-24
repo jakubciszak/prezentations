@@ -1,0 +1,125 @@
+name: "Standard Business Onboarding"
+version: 1
+client_type: business_standard
+description: "Full onboarding flow for standard business clients"
+
+# Stages (Communications) define phases of the onboarding process
+# Steps (Activities) define individual actions within each stage
+# Each step outcome maps to the next step to execute
+
+stages:
+  - id: prospect_intake
+    name: "Prospect Intake"
+    steps:
+      - id: collect_prospect_data
+        name: "Collect Prospect Data"
+        service: prospect_form
+        action: collect
+        required_metadata:
+          - company_name
+          - nip
+          - contact_email
+        outcomes:
+          completed:
+            next_step: check_kuc
+          abandoned:
+            terminal: true
+            case_outcome: abandoned
+
+  - id: verification
+    name: "Client Verification"
+    steps:
+      - id: check_kuc
+        name: "KUC Registry Check"
+        service: kuc
+        action: check_registry
+        outcomes:
+          clean:
+            next_step: calculate_risk
+          flagged:
+            next_step: manual_kuc_review
+          not_found:
+            terminal: true
+            case_outcome: rejected
+
+      - id: manual_kuc_review
+        name: "Manual KUC Review"
+        service: kuc
+        action: manual_review
+        participants:
+          - role: compliance_officer
+        outcomes:
+          approved:
+            next_step: calculate_risk
+          rejected:
+            terminal: true
+            case_outcome: rejected
+
+      - id: calculate_risk
+        name: "Risk Calculation"
+        service: risk_calculation
+        action: calculate
+        outcomes:
+          low_risk:
+            next_step: collect_basic_documents
+          medium_risk:
+            next_step: collect_extended_documents
+          high_risk:
+            terminal: true
+            case_outcome: rejected
+
+  - id: document_collection
+    name: "Document Collection"
+    steps:
+      - id: collect_basic_documents
+        name: "Collect Basic Documents"
+        service: documents
+        action: request_basic
+        required_documents:
+          - registration_certificate
+          - id_scan
+        outcomes:
+          all_received:
+            next_step: final_approval
+          partially_received:
+            next_step: collect_basic_documents  # retry
+          expired:
+            terminal: true
+            case_outcome: expired
+
+      - id: collect_extended_documents
+        name: "Collect Extended Documents"
+        service: documents
+        action: request_extended
+        required_documents:
+          - registration_certificate
+          - id_scan
+          - financial_statements
+          - beneficial_owners_declaration
+        outcomes:
+          all_received:
+            next_step: final_approval
+          partially_received:
+            next_step: collect_extended_documents  # retry
+          expired:
+            terminal: true
+            case_outcome: expired
+
+  - id: finalization
+    name: "Finalization"
+    steps:
+      - id: final_approval
+        name: "Final Approval"
+        service: risk_calculation
+        action: final_check
+        participants:
+          - role: onboarding_manager
+        outcomes:
+          approved:
+            terminal: true
+            case_outcome: approved
+          needs_review:
+            next_step: collect_extended_documents
+          rejected:
+            terminal: true
+            case_outcome: rejected

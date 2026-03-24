@@ -1,0 +1,10 @@
+default:
+    suites:
+        onboarding:
+            paths:
+                - '%paths.base%/features/onboarding'
+            contexts:
+                - Features\Bootstrap\OnboardingContext
+                - Features\Bootstrap\VerificationContext
+                - Features\Bootstrap\DocumentContext
+                - Features\Bootstrap\EventContext

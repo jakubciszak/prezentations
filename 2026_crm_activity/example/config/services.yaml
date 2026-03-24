@@ -1,0 +1,35 @@
+parameters:
+    templates_dir: '%kernel.project_dir%/config/templates'
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: true
+
+    # --- Infrastructure ---
+    App\Infrastructure\YamlTemplateLoader:
+        arguments:
+            $templatesDir: '%templates_dir%'
+
+    App\Onboarding\Template\TemplateRegistry:
+        factory: ['@App\Infrastructure\YamlTemplateLoader', 'loadAll']
+
+    # --- External Service Stubs ---
+    App\ExternalService\KucServiceStub: ~
+    App\ExternalService\DocumentServiceStub: ~
+    App\ExternalService\ProspectFormServiceStub: ~
+    App\ExternalService\RiskCalculationServiceStub: ~
+    App\ExternalService\ServiceDispatcher: ~
+
+    # --- Repository ---
+    App\Onboarding\Model\CaseRepository:
+        class: App\Infrastructure\InMemoryCaseRepository
+
+    # --- Onboarding Engine ---
+    App\Onboarding\Engine\TransitionResolver: ~
+    App\Onboarding\Engine\OnboardingEngine: ~
+
+    # --- Event Handlers ---
+    App\Onboarding\Handler\CaseEventLogger: ~
+    App\Onboarding\Handler\ExternalServiceResponseHandler: ~
