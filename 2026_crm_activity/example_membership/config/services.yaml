@@ -30,6 +30,9 @@ services:
     App\Points\Api\PointsFacade:
         class: App\Points\Application\DefaultPointsFacade
 
+    App\Points\Api\WalletFacade:
+        class: App\Points\Application\DefaultWalletService
+
     # === Rewards context ===
 
     App\Rewards\Api\RewardsFacade:

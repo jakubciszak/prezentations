@@ -9,17 +9,19 @@ use App\MembershipActivity\Domain\ActivityType;
 use App\MembershipActivity\Domain\Outcome;
 use App\MembershipActivity\Domain\OutcomeType;
 use App\Points\Api\PointsFacade;
+use App\Points\Api\WalletFacade;
 
 /**
- * Translates purchase/bonus activities → PointsFacade calls → Outcome.
+ * Translates purchase/bonus activities → PointsFacade (calculate) + WalletFacade (record) → Outcome.
  */
 final class PointsActivityAdapter implements ActivityAdapter
 {
     public function __construct(
         private readonly PointsFacade $points,
+        private readonly WalletFacade $wallet,
     ) {}
 
-    public function handle(Activity $activity): Outcome
+    public function handle(Activity $activity, string $memberId): Outcome
     {
         $calc = match ($activity->type) {
             ActivityType::PurchaseInStore => $this->points->calculateForPurchase(
@@ -41,9 +43,18 @@ final class PointsActivityAdapter implements ActivityAdapter
             default => throw new \DomainException("Unsupported: {$activity->type->value}"),
         };
 
+        $result = $calc->pending
+            ? $this->wallet->earnPending($memberId, $calc->points, $activity->type->value, $calc->reference)
+            : $this->wallet->earn($memberId, $calc->points, $activity->type->value, $calc->reference);
+
         return new Outcome(
             type: $calc->pending ? OutcomeType::PointsPending : OutcomeType::PointsEarned,
-            payload: ['points' => $calc->points, 'reference' => $calc->reference],
+            payload: [
+                'points' => $calc->points,
+                'reference' => $calc->reference,
+                'active_balance' => $result->activeBalance,
+                'pending_balance' => $result->pendingBalance,
+            ],
         );
     }
 }

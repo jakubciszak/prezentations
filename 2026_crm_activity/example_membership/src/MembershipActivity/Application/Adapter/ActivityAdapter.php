@@ -8,13 +8,13 @@ use App\MembershipActivity\Domain\Activity;
 use App\MembershipActivity\Domain\Outcome;
 
 /**
- * Anti-corruption layer: translates an Activity into a facade call
- * on another bounded context and maps the result back to an Outcome.
+ * Anti-corruption layer: translates an Activity into facade calls
+ * on other bounded contexts (calculation + wallet) and returns an Outcome.
  *
- * The adapter knows about Activity (our context) AND the external facade.
- * Neither side knows about the other.
+ * The adapter knows about Activity (our context), the external facade,
+ * AND the wallet facade. Neither external context knows about the other.
  */
 interface ActivityAdapter
 {
-    public function handle(Activity $activity): Outcome;
+    public function handle(Activity $activity, string $memberId): Outcome;
 }

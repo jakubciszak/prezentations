@@ -12,8 +12,8 @@ use App\MembershipActivity\Domain\Outcome;
 /**
  * Routes activities to the appropriate adapter based on FlowRegistry config.
  *
- * In production, dispatch could be async via Messenger —
- * the adapter would emit a command and the result would come back as an event.
+ * Passes memberId so the adapter can record wallet operations
+ * in the Points context on behalf of the member.
  */
 final class ServiceRouter
 {
@@ -25,13 +25,13 @@ final class ServiceRouter
         private readonly array $adapters,
     ) {}
 
-    public function dispatch(Activity $activity): Outcome
+    public function dispatch(Activity $activity, string $memberId): Outcome
     {
         $flow = $this->flows->resolve($activity->type);
 
         $adapter = $this->adapters[$flow->serviceName]
             ?? throw new \DomainException("Adapter not registered: '{$flow->serviceName}'");
 
-        return $adapter->handle($activity);
+        return $adapter->handle($activity, $memberId);
     }
 }

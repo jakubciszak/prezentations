@@ -13,7 +13,9 @@ use App\MembershipActivity\Domain\Activity;
 use App\MembershipActivity\Domain\ActivityType;
 use App\MembershipActivity\Domain\MemberAccount;
 use App\MembershipActivity\Domain\MemberId;
+use App\Points\Api\WalletFacade;
 use App\Points\Application\DefaultPointsFacade;
+use App\Points\Application\DefaultWalletService;
 use App\Points\Domain\InsufficientPointsException;
 use App\Rewards\Application\DefaultRewardsFacade;
 use App\Rewards\Infrastructure\InMemoryRewardCatalog;
@@ -28,6 +30,7 @@ final class MembershipContext implements Context
 {
     private SharedState $state;
     private ServiceRouter $router;
+    private WalletFacade $wallet;
 
     public function __construct()
     {
@@ -41,23 +44,25 @@ final class MembershipContext implements Context
         $this->state = SharedState::getInstance();
 
         $pointsFacade = new DefaultPointsFacade();
+        $this->wallet = new DefaultWalletService();
         $rewardsFacade = new DefaultRewardsFacade(new InMemoryRewardCatalog());
 
         $this->router = new ServiceRouter(
             MembershipFlows::standard(),
             [
-                'points_calculation' => new PointsActivityAdapter($pointsFacade),
-                'points_activation' => new PointsActivationAdapter($pointsFacade),
-                'reward_service' => new RewardsActivityAdapter($rewardsFacade),
+                'points_calculation' => new PointsActivityAdapter($pointsFacade, $this->wallet),
+                'points_activation' => new PointsActivationAdapter($pointsFacade, $this->wallet),
+                'reward_service' => new RewardsActivityAdapter($rewardsFacade, $this->wallet),
             ],
         );
     }
 
     private function process(Activity $activity): void
     {
-        $this->state->currentAccount->record($activity);
-        $outcome = $this->router->dispatch($activity);
-        $this->state->currentAccount->handleOutcome($activity->id->value, $outcome);
+        $account = $this->state->currentAccount;
+        $account->record($activity);
+        $outcome = $this->router->dispatch($activity, $account->id->value);
+        $account->handleOutcome($activity->id->value, $outcome);
     }
 
     #[Given('a member :name with id :memberId')]
@@ -125,14 +130,16 @@ final class MembershipContext implements Context
     #[Then('the member should have :points active points')]
     public function theMemberShouldHaveActivePoints(int $points): void
     {
-        $actual = $this->state->currentAccount->activeBalance();
+        $balance = $this->wallet->getBalance($this->state->currentAccount->id->value);
+        $actual = $balance->active;
         assert($actual === $points, "Expected {$points} active points, got {$actual}");
     }
 
     #[Then('the member should have :points pending points')]
     public function theMemberShouldHavePendingPoints(int $points): void
     {
-        $actual = $this->state->currentAccount->pendingBalance();
+        $balance = $this->wallet->getBalance($this->state->currentAccount->id->value);
+        $actual = $balance->pending;
         assert($actual === $points, "Expected {$points} pending points, got {$actual}");
     }
 
