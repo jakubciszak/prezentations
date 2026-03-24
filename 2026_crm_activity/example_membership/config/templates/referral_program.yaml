@@ -1,0 +1,52 @@
+name: "Referral Program"
+version: 1
+client_type: referral_program
+description: "Loyalty activity flow for member referral rewards"
+
+stages:
+  - id: referral_validation
+    name: "Referral Validation"
+    steps:
+      - id: validate_referral
+        name: "Validate Referral"
+        service: transaction
+        action: validate_referral
+        participants:
+          - role: referrer
+          - role: referred
+        required_metadata:
+          - referrer_member_id
+          - referred_member_id
+          - referral_code
+        outcomes:
+          valid:
+            next_step: calculate_bonus
+          invalid:
+            terminal: true
+            case_outcome: rejected
+          duplicate:
+            terminal: true
+            case_outcome: rejected
+
+  - id: bonus_processing
+    name: "Bonus Processing"
+    steps:
+      - id: calculate_bonus
+        name: "Calculate Referral Bonus"
+        service: points
+        action: calculate_referral_bonus
+        outcomes:
+          bonus_calculated:
+            next_step: notify_members
+
+  - id: notification
+    name: "Notification"
+    steps:
+      - id: notify_members
+        name: "Notify Members"
+        service: notification
+        action: send_referral_notification
+        outcomes:
+          notified:
+            terminal: true
+            case_outcome: points_awarded

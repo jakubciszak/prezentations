@@ -1,0 +1,36 @@
+parameters:
+    templates_dir: '%kernel.project_dir%/config/templates'
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: true
+
+    # --- Infrastructure ---
+    App\Infrastructure\YamlTemplateLoader:
+        arguments:
+            $templatesDir: '%templates_dir%'
+
+    App\Membership\Template\TemplateRegistry:
+        factory: ['@App\Infrastructure\YamlTemplateLoader', 'loadAll']
+
+    # --- External Service Stubs ---
+    App\ExternalService\TransactionServiceStub: ~
+    App\ExternalService\PointsServiceStub: ~
+    App\ExternalService\TierServiceStub: ~
+    App\ExternalService\RewardServiceStub: ~
+    App\ExternalService\NotificationServiceStub: ~
+    App\ExternalService\ServiceDispatcher: ~
+
+    # --- Repository ---
+    App\Membership\Model\CaseRepository:
+        class: App\Infrastructure\InMemoryCaseRepository
+
+    # --- Membership Engine ---
+    App\Membership\Engine\TransitionResolver: ~
+    App\Membership\Engine\MembershipEngine: ~
+
+    # --- Event Handlers ---
+    App\Membership\Handler\CaseEventLogger: ~
+    App\Membership\Handler\ExternalServiceResponseHandler: ~

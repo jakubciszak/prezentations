@@ -1,0 +1,27 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Membership\Model;
+
+use Ramsey\Uuid\Uuid;
+
+final readonly class CaseId
+{
+    private function __construct(public string $value) {}
+
+    public static function generate(): self
+    {
+        return new self(Uuid::uuid4()->toString());
+    }
+
+    public static function from(string $value): self
+    {
+        return new self($value);
+    }
+
+    public function __toString(): string
+    {
+        return $this->value;
+    }
+}

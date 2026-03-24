@@ -1,0 +1,62 @@
+name: "Online Purchase"
+version: 1
+client_type: online_purchase
+description: "Simplified loyalty activity flow for online purchases"
+
+stages:
+  - id: transaction_validation
+    name: "Transaction Validation"
+    steps:
+      - id: validate_transaction
+        name: "Validate Online Transaction"
+        service: transaction
+        action: validate_online
+        participants:
+          - role: customer
+        required_metadata:
+          - transaction_id
+          - amount
+          - currency
+          - order_id
+        outcomes:
+          valid:
+            next_step: calculate_points
+          invalid:
+            terminal: true
+            case_outcome: rejected
+
+  - id: points_processing
+    name: "Points Processing"
+    steps:
+      - id: calculate_points
+        name: "Calculate Points with Online Bonus"
+        service: points
+        action: calculate_with_bonus
+        outcomes:
+          points_calculated:
+            next_step: evaluate_tier
+          bonus_applied:
+            next_step: evaluate_tier
+
+  - id: tier_and_reward
+    name: "Tier & Reward"
+    steps:
+      - id: evaluate_tier
+        name: "Quick Tier Evaluation"
+        service: tier
+        action: quick_evaluate
+        outcomes:
+          tier_unchanged:
+            terminal: true
+            case_outcome: points_awarded
+          tier_upgrade:
+            next_step: auto_upgrade
+
+      - id: auto_upgrade
+        name: "Auto Tier Upgrade"
+        service: tier
+        action: auto_upgrade
+        outcomes:
+          upgraded:
+            terminal: true
+            case_outcome: tier_upgraded
