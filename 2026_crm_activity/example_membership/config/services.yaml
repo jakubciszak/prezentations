@@ -12,23 +12,28 @@ services:
     App\MembershipActivity\Domain\MemberAccountRepository:
         class: App\MembershipActivity\Infrastructure\InMemoryMemberAccountRepository
 
+    App\MembershipActivity\Application\Adapter\PointsActivityAdapter: ~
+    App\MembershipActivity\Application\Adapter\PointsActivationAdapter: ~
+    App\MembershipActivity\Application\Adapter\RewardsActivityAdapter: ~
+
     App\MembershipActivity\Application\ServiceRouter:
         arguments:
-            $services:
-                points_calculation: '@App\Points\Application\PointsCalculationService'
-                points_activation: '@App\Points\Application\PointsActivationService'
-                reward_service: '@App\Rewards\Application\RewardRedemptionService'
+            $adapters:
+                points_calculation: '@App\MembershipActivity\Application\Adapter\PointsActivityAdapter'
+                points_activation: '@App\MembershipActivity\Application\Adapter\PointsActivationAdapter'
+                reward_service: '@App\MembershipActivity\Application\Adapter\RewardsActivityAdapter'
 
     App\MembershipActivity\Handler\EventLogger: ~
 
     # === Points context ===
 
-    App\Points\Application\PointsCalculationService: ~
-    App\Points\Application\PointsActivationService: ~
+    App\Points\Api\PointsFacade:
+        class: App\Points\Application\DefaultPointsFacade
 
     # === Rewards context ===
 
+    App\Rewards\Api\RewardsFacade:
+        class: App\Rewards\Application\DefaultRewardsFacade
+
     App\Rewards\Domain\RewardCatalog:
         class: App\Rewards\Infrastructure\InMemoryRewardCatalog
-
-    App\Rewards\Application\RewardRedemptionService: ~

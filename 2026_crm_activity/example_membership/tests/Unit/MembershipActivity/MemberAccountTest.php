@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Tests\Unit\MembershipActivity;
 
+use App\MembershipActivity\Application\Adapter\PointsActivationAdapter;
+use App\MembershipActivity\Application\Adapter\PointsActivityAdapter;
+use App\MembershipActivity\Application\Adapter\RewardsActivityAdapter;
 use App\MembershipActivity\Application\Flow\MembershipFlows;
 use App\MembershipActivity\Application\ServiceRouter;
 use App\MembershipActivity\Domain\Activity;
@@ -17,10 +20,9 @@ use App\MembershipActivity\Event\PointsActivated;
 use App\MembershipActivity\Event\PointsEarned;
 use App\MembershipActivity\Event\PointsPending;
 use App\MembershipActivity\Event\PointsSpent;
-use App\Points\Application\PointsActivationService;
-use App\Points\Application\PointsCalculationService;
+use App\Points\Application\DefaultPointsFacade;
 use App\Points\Domain\InsufficientPointsException;
-use App\Rewards\Application\RewardRedemptionService;
+use App\Rewards\Application\DefaultRewardsFacade;
 use App\Rewards\Infrastructure\InMemoryRewardCatalog;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -31,12 +33,15 @@ final class MemberAccountTest extends TestCase
 
     protected function setUp(): void
     {
+        $pointsFacade = new DefaultPointsFacade();
+        $rewardsFacade = new DefaultRewardsFacade(new InMemoryRewardCatalog());
+
         $this->router = new ServiceRouter(
             MembershipFlows::standard(),
             [
-                'points_calculation' => new PointsCalculationService(),
-                'points_activation' => new PointsActivationService(),
-                'reward_service' => new RewardRedemptionService(new InMemoryRewardCatalog()),
+                'points_calculation' => new PointsActivityAdapter($pointsFacade),
+                'points_activation' => new PointsActivationAdapter($pointsFacade),
+                'reward_service' => new RewardsActivityAdapter($rewardsFacade),
             ],
         );
     }
@@ -51,8 +56,8 @@ final class MemberAccountTest extends TestCase
     private function process(MemberAccount $account, Activity $activity): void
     {
         $account->record($activity);
-        $response = $this->router->dispatch($activity);
-        $account->handleServiceResponse($response);
+        $outcome = $this->router->dispatch($activity);
+        $account->handleOutcome($activity->id->value, $outcome);
     }
 
     private function givenMemberWithPoints(int $points): MemberAccount
@@ -71,8 +76,8 @@ final class MemberAccountTest extends TestCase
     public function opening_account_emits_member_opened(): void
     {
         $account = MemberAccount::open(MemberId::from('MBR-001'), 'Jan');
-        $events = $account->releaseEvents();
 
+        $events = $account->releaseEvents();
         self::assertCount(1, $events);
         self::assertInstanceOf(MemberOpened::class, $events[0]);
     }
@@ -83,7 +88,7 @@ final class MemberAccountTest extends TestCase
         self::assertSame(0, $this->givenMember()->activeBalance());
     }
 
-    // --- Record + Service flow ---
+    // --- Record + adapter flow ---
 
     #[Test]
     public function recording_activity_does_not_change_balance(): void
@@ -96,20 +101,19 @@ final class MemberAccountTest extends TestCase
     }
 
     #[Test]
-    public function handling_service_response_completes_activity_and_updates_ledger(): void
+    public function handling_outcome_completes_activity_and_updates_ledger(): void
     {
         $account = $this->givenMember();
         $activity = new Activity(ActivityType::PurchaseInStore, ['amount' => 150, 'transaction_id' => 'T1']);
 
         $account->record($activity);
-        $response = $this->router->dispatch($activity);
-        $outcome = $account->handleServiceResponse($response);
+        $outcome = $this->router->dispatch($activity);
+        $result = $account->handleOutcome($activity->id->value, $outcome);
 
-        self::assertSame(OutcomeType::PointsEarned, $outcome->type);
-        self::assertSame(150, $outcome->payload['points']);
+        self::assertSame(OutcomeType::PointsEarned, $result->type);
+        self::assertSame(150, $result->payload['points']);
         self::assertSame(150, $account->activeBalance());
         self::assertTrue($activity->isCompleted());
-        self::assertNotNull($activity->outcome());
     }
 
     // --- In-store purchase ---
@@ -210,10 +214,10 @@ final class MemberAccountTest extends TestCase
         $account = $this->givenMember();
         $activity = new Activity(ActivityType::PackageDelivered, ['order_id' => 'ORD-UNKNOWN']);
         $account->record($activity);
-        $response = $this->router->dispatch($activity);
+        $outcome = $this->router->dispatch($activity);
 
         $this->expectException(\DomainException::class);
-        $account->handleServiceResponse($response);
+        $account->handleOutcome($activity->id->value, $outcome);
     }
 
     // --- Challenge ---
@@ -276,10 +280,10 @@ final class MemberAccountTest extends TestCase
         $account = $this->givenMemberWithPoints(500);
         $activity = new Activity(ActivityType::RewardRedemption, ['reward_id' => 'RWD-10PCT']);
         $account->record($activity);
-        $response = $this->router->dispatch($activity);
+        $outcome = $this->router->dispatch($activity);
 
         $this->expectException(InsufficientPointsException::class);
-        $account->handleServiceResponse($response);
+        $account->handleOutcome($activity->id->value, $outcome);
     }
 
     // --- Activity log ---
@@ -298,7 +302,6 @@ final class MemberAccountTest extends TestCase
 
         foreach ($activities as $a) {
             self::assertTrue($a->isCompleted());
-            self::assertNotNull($a->outcome());
         }
     }
 

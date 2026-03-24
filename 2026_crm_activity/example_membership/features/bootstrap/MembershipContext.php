@@ -4,16 +4,18 @@ declare(strict_types=1);
 
 namespace Features\Bootstrap;
 
+use App\MembershipActivity\Application\Adapter\PointsActivationAdapter;
+use App\MembershipActivity\Application\Adapter\PointsActivityAdapter;
+use App\MembershipActivity\Application\Adapter\RewardsActivityAdapter;
 use App\MembershipActivity\Application\Flow\MembershipFlows;
 use App\MembershipActivity\Application\ServiceRouter;
 use App\MembershipActivity\Domain\Activity;
 use App\MembershipActivity\Domain\ActivityType;
 use App\MembershipActivity\Domain\MemberAccount;
 use App\MembershipActivity\Domain\MemberId;
-use App\Points\Application\PointsActivationService;
-use App\Points\Application\PointsCalculationService;
+use App\Points\Application\DefaultPointsFacade;
 use App\Points\Domain\InsufficientPointsException;
-use App\Rewards\Application\RewardRedemptionService;
+use App\Rewards\Application\DefaultRewardsFacade;
 use App\Rewards\Infrastructure\InMemoryRewardCatalog;
 use Behat\Behat\Context\Context;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
@@ -38,13 +40,15 @@ final class MembershipContext implements Context
         SharedState::reset();
         $this->state = SharedState::getInstance();
 
-        $catalog = new InMemoryRewardCatalog();
+        $pointsFacade = new DefaultPointsFacade();
+        $rewardsFacade = new DefaultRewardsFacade(new InMemoryRewardCatalog());
+
         $this->router = new ServiceRouter(
             MembershipFlows::standard(),
             [
-                'points_calculation' => new PointsCalculationService(),
-                'points_activation' => new PointsActivationService(),
-                'reward_service' => new RewardRedemptionService($catalog),
+                'points_calculation' => new PointsActivityAdapter($pointsFacade),
+                'points_activation' => new PointsActivationAdapter($pointsFacade),
+                'reward_service' => new RewardsActivityAdapter($rewardsFacade),
             ],
         );
     }
@@ -52,8 +56,8 @@ final class MembershipContext implements Context
     private function process(Activity $activity): void
     {
         $this->state->currentAccount->record($activity);
-        $response = $this->router->dispatch($activity);
-        $this->state->currentAccount->handleServiceResponse($response);
+        $outcome = $this->router->dispatch($activity);
+        $this->state->currentAccount->handleOutcome($activity->id->value, $outcome);
     }
 
     #[Given('a member :name with id :memberId')]

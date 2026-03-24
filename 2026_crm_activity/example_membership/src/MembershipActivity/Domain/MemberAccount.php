@@ -11,18 +11,17 @@ use App\MembershipActivity\Event\PointsEarned;
 use App\MembershipActivity\Event\PointsPending;
 use App\MembershipActivity\Event\PointsSpent;
 use App\Points\Domain\PointsLedger;
-use App\SharedKernel\ServiceResponse;
 
 /**
  * MemberAccount — long-lived aggregate for a loyalty program member.
  *
  * Two entry points:
- * - record(Activity)                 — stores a new activity (bare fact)
- * - handleServiceResponse(response)  — receives what a service decided,
- *                                      applies to ledger, completes activity
+ * - record(Activity)                  — stores a new activity (bare fact)
+ * - handleOutcome(activityId, outcome) — applies outcome to ledger, completes activity
  *
- * The account never decides business logic (how many points, what reward).
- * It only interprets OutcomeType → ledger operation.
+ * The Outcome comes from an external adapter (via ServiceRouter),
+ * which called the appropriate bounded context facade.
+ * The account only interprets OutcomeType → ledger operation.
  */
 final class MemberAccount
 {
@@ -58,19 +57,19 @@ final class MemberAccount
     }
 
     /**
-     * Handle a service response — applies the outcome to the ledger,
-     * completes the activity, and emits domain events.
+     * Handle an outcome produced by an external service (via adapter).
+     * Applies the effect to the ledger, completes the activity, emits events.
      */
-    public function handleServiceResponse(ServiceResponse $response): Outcome
+    public function handleOutcome(string $activityId, Outcome $outcome): Outcome
     {
-        $activity = $this->findActivity($response->activityId);
+        $activity = $this->findActivity($activityId);
 
-        $outcome = $this->applyToLedger($response->outcomeType, $response->payload);
-        $activity->complete($outcome);
+        $finalOutcome = $this->applyToLedger($outcome);
+        $activity->complete($finalOutcome);
 
-        $this->emitEventsFor($activity, $outcome);
+        $this->emitEventsFor($activity, $finalOutcome);
 
-        return $outcome;
+        return $finalOutcome;
     }
 
     // ==================== Queries ====================
@@ -111,39 +110,60 @@ final class MemberAccount
 
     // ==================== Internals ====================
 
-    private function applyToLedger(OutcomeType $type, array $payload): Outcome
+    /**
+     * Apply outcome to ledger. For activation, enrich with actual points
+     * (the external service doesn't know the amount — the ledger does).
+     */
+    private function applyToLedger(Outcome $outcome): Outcome
     {
-        match ($type) {
+        if ($outcome->type === OutcomeType::PointsActivated) {
+            return $this->applyActivation($outcome);
+        }
+
+        match ($outcome->type) {
             OutcomeType::PointsEarned => $this->pointsLedger->earn(
-                $payload['points'],
-                $type->value,
-                $payload['reference'] ?? '',
+                $outcome->payload['points'],
+                $outcome->type->value,
+                $outcome->payload['reference'] ?? '',
             ),
 
             OutcomeType::PointsPending => $this->pointsLedger->earnPending(
-                $payload['points'],
-                $type->value,
-                $payload['reference'],
-            ),
-
-            OutcomeType::PointsActivated => $this->pointsLedger->activateByReference(
-                $payload['reference'],
+                $outcome->payload['points'],
+                $outcome->type->value,
+                $outcome->payload['reference'],
             ),
 
             OutcomeType::PointsSpent => $this->pointsLedger->spend(
-                $payload['points'],
-                $type->value,
-                $payload['reference'] ?? '',
+                $outcome->payload['points'],
+                $outcome->type->value,
+                $outcome->payload['reference'] ?? '',
             ),
 
             OutcomeType::RewardIssued => $this->pointsLedger->spend(
-                $payload['points_spent'],
-                $type->value,
-                "reward:{$payload['reward_id']}",
+                $outcome->payload['points_spent'],
+                $outcome->type->value,
+                "reward:{$outcome->payload['reward_id']}",
             ),
+
+            default => null,
         };
 
-        return new Outcome($type, $payload);
+        return $outcome;
+    }
+
+    private function applyActivation(Outcome $outcome): Outcome
+    {
+        $reference = $outcome->payload['reference'];
+
+        $pending = $this->pointsLedger->pendingEntriesForReference($reference);
+        $points = array_sum(array_map(fn($e) => $e->amount, $pending));
+
+        $this->pointsLedger->activateByReference($reference);
+
+        return new Outcome($outcome->type, [
+            ...$outcome->payload,
+            'points' => $points,
+        ]);
     }
 
     private function findActivity(string $activityId): Activity
@@ -177,7 +197,7 @@ final class MemberAccount
             OutcomeType::PointsActivated => $this->recordEvent(new PointsActivated(
                 memberId: $this->id->value,
                 activityId: $activity->id->value,
-                points: $outcome->payload['points'] ?? 0,
+                points: $outcome->payload['points'],
                 reference: $outcome->payload['reference'],
                 activeBalance: $this->pointsLedger->activeBalance(),
             )),
