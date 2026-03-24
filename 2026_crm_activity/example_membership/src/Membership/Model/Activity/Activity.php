@@ -7,22 +7,21 @@ namespace App\Membership\Model\Activity;
 use DateTimeImmutable;
 
 /**
- * Activity — a business-relevant fact recorded on a member account.
+ * Activity — a bare business fact. No business logic, no point calculations.
  *
- * Generic by design: type + subject (arbitrary key-value data).
- * The aggregate doesn't need to understand the internals —
- * ReactionRules extract what they need via get().
- *
- * Outcome is attached after the rule is applied.
+ * Created with type + subject data, then recorded on MemberAccount.
+ * A service processes it asynchronously and the account receives
+ * the result via ServiceResponse, which completes the activity with an Outcome.
  */
 final class Activity
 {
     public readonly ActivityId $id;
     public readonly DateTimeImmutable $occurredAt;
-    private ?ActivityOutcome $outcome = null;
+    private ActivityStatus $status = ActivityStatus::Recorded;
+    private ?Outcome $outcome = null;
 
     /**
-     * @param array<string, mixed> $subject  arbitrary data about the activity
+     * @param array<string, mixed> $subject
      */
     public function __construct(
         public readonly ActivityType $type,
@@ -43,16 +42,29 @@ final class Activity
         return array_key_exists($key, $this->subject);
     }
 
-    public function withOutcome(ActivityOutcome $outcome): void
+    public function complete(Outcome $outcome): void
     {
-        if ($this->outcome !== null) {
-            throw new \LogicException('Activity outcome already set');
-        }
         $this->outcome = $outcome;
+        $this->status = ActivityStatus::Completed;
     }
 
-    public function outcome(): ?ActivityOutcome
+    public function fail(): void
+    {
+        $this->status = ActivityStatus::Failed;
+    }
+
+    public function status(): ActivityStatus
+    {
+        return $this->status;
+    }
+
+    public function outcome(): ?Outcome
     {
         return $this->outcome;
+    }
+
+    public function isCompleted(): bool
+    {
+        return $this->status === ActivityStatus::Completed;
     }
 }

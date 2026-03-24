@@ -4,9 +4,20 @@ services:
         autoconfigure: true
         public: true
 
-    # --- Reaction Rules ---
-    App\Membership\Model\Reaction\ReactionRules:
-        factory: ['App\Membership\Model\Reaction\MembershipReactions', 'standard']
+    # --- Flow Configuration ---
+    App\Membership\Model\Flow\FlowRegistry:
+        factory: ['App\Membership\Model\Flow\MembershipFlows', 'standard']
+
+    # --- Services ---
+    App\Membership\Service\PointsCalculationService: ~
+    App\Membership\Service\PointsActivationService: ~
+    App\Membership\Service\RewardService: ~
+    App\Membership\Service\ServiceRouter:
+        arguments:
+            $services:
+                points_calculation: '@App\Membership\Service\PointsCalculationService'
+                points_activation: '@App\Membership\Service\PointsActivationService'
+                reward_service: '@App\Membership\Service\RewardService'
 
     # --- Repositories ---
     App\Membership\Model\MemberAccountRepository:

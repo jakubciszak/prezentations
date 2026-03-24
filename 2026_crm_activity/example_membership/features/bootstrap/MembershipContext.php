@@ -7,10 +7,14 @@ namespace Features\Bootstrap;
 use App\Infrastructure\InMemoryRewardCatalog;
 use App\Membership\Model\Activity\Activity;
 use App\Membership\Model\Activity\ActivityType;
+use App\Membership\Model\Flow\MembershipFlows;
 use App\Membership\Model\MemberAccount;
 use App\Membership\Model\MemberId;
 use App\Membership\Model\Points\InsufficientPointsException;
-use App\Membership\Model\Reaction\MembershipReactions;
+use App\Membership\Service\PointsActivationService;
+use App\Membership\Service\PointsCalculationService;
+use App\Membership\Service\RewardService;
+use App\Membership\Service\ServiceRouter;
 use Behat\Behat\Context\Context;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
 use Behat\Hook\BeforeScenario;
@@ -21,6 +25,7 @@ use Behat\Step\When;
 final class MembershipContext implements Context
 {
     private SharedState $state;
+    private ServiceRouter $router;
 
     public function __construct()
     {
@@ -33,46 +38,61 @@ final class MembershipContext implements Context
         SharedState::reset();
         $this->state = SharedState::getInstance();
         $this->state->rewardCatalog = new InMemoryRewardCatalog();
+
+        $this->router = new ServiceRouter(
+            MembershipFlows::standard(),
+            [
+                'points_calculation' => new PointsCalculationService(),
+                'points_activation' => new PointsActivationService(),
+                'reward_service' => new RewardService($this->state->rewardCatalog),
+            ],
+        );
+    }
+
+    /**
+     * Record → dispatch to service → handle response (synchronous in tests).
+     */
+    private function process(Activity $activity): void
+    {
+        $this->state->currentAccount->record($activity);
+        $response = $this->router->dispatch($activity);
+        $this->state->currentAccount->handleServiceResponse($response);
     }
 
     #[Given('a member :name with id :memberId')]
     public function aMember(string $name, string $memberId): void
     {
-        $this->state->currentAccount = MemberAccount::open(
-            MemberId::from($memberId),
-            $name,
-            MembershipReactions::standard(),
-        );
+        $this->state->currentAccount = MemberAccount::open(MemberId::from($memberId), $name);
     }
 
     #[Given('the member has earned :points points from purchases')]
     public function theMemberHasEarnedPoints(int $points): void
     {
-        $this->state->currentAccount->record(new Activity(ActivityType::PurchaseInStore, [
-            'amount' => $points, 'currency' => 'PLN', 'store_id' => 'SETUP', 'transaction_id' => 'TXN-SETUP',
+        $this->process(new Activity(ActivityType::PurchaseInStore, [
+            'amount' => $points, 'transaction_id' => 'TXN-SETUP',
         ]));
     }
 
     #[When('the member makes an in-store purchase of :amount PLN at store :storeId with transaction :txnId')]
     public function theMemberMakesPurchase(int $amount, string $storeId, string $txnId): void
     {
-        $this->state->currentAccount->record(new Activity(ActivityType::PurchaseInStore, [
-            'amount' => $amount, 'currency' => 'PLN', 'store_id' => $storeId, 'transaction_id' => $txnId,
+        $this->process(new Activity(ActivityType::PurchaseInStore, [
+            'amount' => $amount, 'store_id' => $storeId, 'transaction_id' => $txnId,
         ]));
     }
 
     #[When('the member makes an online purchase of :amount PLN with order :orderId')]
     public function theMemberMakesOnlinePurchase(int $amount, string $orderId): void
     {
-        $this->state->currentAccount->record(new Activity(ActivityType::OnlinePurchase, [
-            'amount' => $amount, 'currency' => 'PLN', 'order_id' => $orderId,
+        $this->process(new Activity(ActivityType::OnlinePurchase, [
+            'amount' => $amount, 'order_id' => $orderId,
         ]));
     }
 
     #[When('the package for order :orderId is delivered')]
     public function thePackageIsDelivered(string $orderId): void
     {
-        $this->state->currentAccount->record(new Activity(ActivityType::PackageDelivered, [
+        $this->process(new Activity(ActivityType::PackageDelivered, [
             'order_id' => $orderId,
         ]));
     }
@@ -80,7 +100,7 @@ final class MembershipContext implements Context
     #[When('the member completes challenge :challengeId earning :points bonus points')]
     public function theMemberCompletesChallenge(string $challengeId, int $points): void
     {
-        $this->state->currentAccount->record(new Activity(ActivityType::ChallengeCompleted, [
+        $this->process(new Activity(ActivityType::ChallengeCompleted, [
             'challenge_id' => $challengeId, 'bonus_points' => $points,
         ]));
     }
@@ -88,7 +108,7 @@ final class MembershipContext implements Context
     #[When('the member receives a birthday bonus of :points points')]
     public function theMemberReceivesBirthdayBonus(int $points): void
     {
-        $this->state->currentAccount->record(new Activity(ActivityType::BirthdayBonus, [
+        $this->process(new Activity(ActivityType::BirthdayBonus, [
             'bonus_points' => $points,
         ]));
     }
@@ -96,13 +116,8 @@ final class MembershipContext implements Context
     #[When('the member redeems reward :rewardId')]
     public function theMemberRedeemsReward(string $rewardId): void
     {
-        $reward = $this->state->rewardCatalog->findById($rewardId);
-        assert($reward !== null, "Reward '{$rewardId}' not found in catalog");
-
-        $this->state->currentAccount->record(new Activity(ActivityType::RewardRedemption, [
-            'reward_id' => $reward->id,
-            'reward_name' => $reward->name,
-            'points_cost' => $reward->pointsCost,
+        $this->process(new Activity(ActivityType::RewardRedemption, [
+            'reward_id' => $rewardId,
         ]));
     }
 
@@ -142,7 +157,7 @@ final class MembershipContext implements Context
     {
         $actual = count(array_filter(
             $this->state->currentAccount->activities(),
-            fn($a) => $a->type === ActivityType::RewardRedemption,
+            fn($a) => $a->type === ActivityType::RewardRedemption && $a->isCompleted(),
         ));
         assert($actual === $count, "Expected {$count} redemptions, got {$actual}");
     }
@@ -150,13 +165,10 @@ final class MembershipContext implements Context
     #[Then('redeeming reward :rewardId should fail with insufficient points')]
     public function redeemingRewardShouldFail(string $rewardId): void
     {
-        $reward = $this->state->rewardCatalog->findById($rewardId);
-        assert($reward !== null);
+        $activity = new Activity(ActivityType::RewardRedemption, ['reward_id' => $rewardId]);
 
         try {
-            $this->state->currentAccount->record(new Activity(ActivityType::RewardRedemption, [
-                'reward_id' => $reward->id, 'reward_name' => $reward->name, 'points_cost' => $reward->pointsCost,
-            ]));
+            $this->process($activity);
             assert(false, 'Expected InsufficientPointsException was not thrown');
         } catch (InsufficientPointsException) {
             // expected

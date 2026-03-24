@@ -86,6 +86,10 @@ final class PointsLedger
             }
         }
 
+        if ($count === 0) {
+            throw new \DomainException("No pending entries found for reference '{$reference}'");
+        }
+
         return $count;
     }
 
