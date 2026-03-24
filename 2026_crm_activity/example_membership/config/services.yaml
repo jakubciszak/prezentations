@@ -4,27 +4,31 @@ services:
         autoconfigure: true
         public: true
 
-    # --- Flow Configuration ---
-    App\Membership\Model\Flow\FlowRegistry:
-        factory: ['App\Membership\Model\Flow\MembershipFlows', 'standard']
+    # === MembershipActivity context ===
 
-    # --- Services ---
-    App\Membership\Service\PointsCalculationService: ~
-    App\Membership\Service\PointsActivationService: ~
-    App\Membership\Service\RewardService: ~
-    App\Membership\Service\ServiceRouter:
+    App\MembershipActivity\Application\Flow\FlowRegistry:
+        factory: ['App\MembershipActivity\Application\Flow\MembershipFlows', 'standard']
+
+    App\MembershipActivity\Domain\MemberAccountRepository:
+        class: App\MembershipActivity\Infrastructure\InMemoryMemberAccountRepository
+
+    App\MembershipActivity\Application\ServiceRouter:
         arguments:
             $services:
-                points_calculation: '@App\Membership\Service\PointsCalculationService'
-                points_activation: '@App\Membership\Service\PointsActivationService'
-                reward_service: '@App\Membership\Service\RewardService'
+                points_calculation: '@App\Points\Application\PointsCalculationService'
+                points_activation: '@App\Points\Application\PointsActivationService'
+                reward_service: '@App\Rewards\Application\RewardRedemptionService'
 
-    # --- Repositories ---
-    App\Membership\Model\MemberAccountRepository:
-        class: App\Infrastructure\InMemoryMemberAccountRepository
+    App\MembershipActivity\Handler\EventLogger: ~
 
-    App\Membership\Model\Reward\RewardCatalog:
-        class: App\Infrastructure\InMemoryRewardCatalog
+    # === Points context ===
 
-    # --- Event Handlers ---
-    App\Membership\Handler\EventLogger: ~
+    App\Points\Application\PointsCalculationService: ~
+    App\Points\Application\PointsActivationService: ~
+
+    # === Rewards context ===
+
+    App\Rewards\Domain\RewardCatalog:
+        class: App\Rewards\Infrastructure\InMemoryRewardCatalog
+
+    App\Rewards\Application\RewardRedemptionService: ~

@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Points;
 
-use App\Membership\Model\Points\EntryStatus;
-use App\Membership\Model\Points\EntryType;
-use App\Membership\Model\Points\InsufficientPointsException;
-use App\Membership\Model\Points\PointsLedger;
+use App\Points\Domain\EntryStatus;
+use App\Points\Domain\EntryType;
+use App\Points\Domain\InsufficientPointsException;
+use App\Points\Domain\PointsLedger;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
@@ -72,6 +72,15 @@ final class PointsLedgerTest extends TestCase
 
         self::assertSame(300, $ledger->activeBalance());
         self::assertSame(200, $ledger->pendingBalance());
+    }
+
+    #[Test]
+    public function activate_unknown_reference_throws(): void
+    {
+        $ledger = new PointsLedger();
+
+        $this->expectException(\DomainException::class);
+        $ledger->activateByReference('UNKNOWN');
     }
 
     #[Test]

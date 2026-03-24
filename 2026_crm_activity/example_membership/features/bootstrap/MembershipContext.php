@@ -4,17 +4,17 @@ declare(strict_types=1);
 
 namespace Features\Bootstrap;
 
-use App\Infrastructure\InMemoryRewardCatalog;
-use App\Membership\Model\Activity\Activity;
-use App\Membership\Model\Activity\ActivityType;
-use App\Membership\Model\Flow\MembershipFlows;
-use App\Membership\Model\MemberAccount;
-use App\Membership\Model\MemberId;
-use App\Membership\Model\Points\InsufficientPointsException;
-use App\Membership\Service\PointsActivationService;
-use App\Membership\Service\PointsCalculationService;
-use App\Membership\Service\RewardService;
-use App\Membership\Service\ServiceRouter;
+use App\MembershipActivity\Application\Flow\MembershipFlows;
+use App\MembershipActivity\Application\ServiceRouter;
+use App\MembershipActivity\Domain\Activity;
+use App\MembershipActivity\Domain\ActivityType;
+use App\MembershipActivity\Domain\MemberAccount;
+use App\MembershipActivity\Domain\MemberId;
+use App\Points\Application\PointsActivationService;
+use App\Points\Application\PointsCalculationService;
+use App\Points\Domain\InsufficientPointsException;
+use App\Rewards\Application\RewardRedemptionService;
+use App\Rewards\Infrastructure\InMemoryRewardCatalog;
 use Behat\Behat\Context\Context;
 use Behat\Behat\Hook\Scope\BeforeScenarioScope;
 use Behat\Hook\BeforeScenario;
@@ -37,21 +37,18 @@ final class MembershipContext implements Context
     {
         SharedState::reset();
         $this->state = SharedState::getInstance();
-        $this->state->rewardCatalog = new InMemoryRewardCatalog();
 
+        $catalog = new InMemoryRewardCatalog();
         $this->router = new ServiceRouter(
             MembershipFlows::standard(),
             [
                 'points_calculation' => new PointsCalculationService(),
                 'points_activation' => new PointsActivationService(),
-                'reward_service' => new RewardService($this->state->rewardCatalog),
+                'reward_service' => new RewardRedemptionService($catalog),
             ],
         );
     }
 
-    /**
-     * Record → dispatch to service → handle response (synchronous in tests).
-     */
     private function process(Activity $activity): void
     {
         $this->state->currentAccount->record($activity);
