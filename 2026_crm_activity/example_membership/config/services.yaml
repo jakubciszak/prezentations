@@ -4,6 +4,10 @@ services:
         autoconfigure: true
         public: true
 
+    # --- Reaction Rules ---
+    App\Membership\Model\Reaction\ReactionRules:
+        factory: ['App\Membership\Model\Reaction\MembershipReactions', 'standard']
+
     # --- Repositories ---
     App\Membership\Model\MemberAccountRepository:
         class: App\Infrastructure\InMemoryMemberAccountRepository

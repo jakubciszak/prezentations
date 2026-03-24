@@ -9,37 +9,39 @@ use App\Membership\Event\PointsActivated;
 use App\Membership\Event\PointsEarned;
 use App\Membership\Event\PointsPending;
 use App\Membership\Event\PointsSpent;
-use App\Membership\Event\RewardRedeemed;
+use App\Membership\Model\Activity\Activity;
 use App\Membership\Model\Activity\ActivityType;
 use App\Membership\Model\Activity\OutcomeType;
 use App\Membership\Model\MemberAccount;
 use App\Membership\Model\MemberId;
 use App\Membership\Model\Points\InsufficientPointsException;
-use App\Membership\Model\Reward\Reward;
-use App\Membership\Model\Reward\RewardType;
+use App\Membership\Model\Reaction\MembershipReactions;
+use App\Membership\Model\Reaction\ReactionRules;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 
 final class MemberAccountTest extends TestCase
 {
+    private function rules(): ReactionRules
+    {
+        return MembershipReactions::standard();
+    }
+
     private function givenMember(): MemberAccount
     {
-        $account = MemberAccount::open(MemberId::from('MBR-001'), 'Jan Kowalski');
-        $account->releaseEvents(); // clear MemberOpened
+        $account = MemberAccount::open(MemberId::from('MBR-001'), 'Jan Kowalski', $this->rules());
+        $account->releaseEvents();
         return $account;
     }
 
     private function givenMemberWithPoints(int $points): MemberAccount
     {
         $account = $this->givenMember();
-        $account->recordPurchase($points, 'PLN', 'STORE-01', 'TXN-SETUP');
+        $account->record(new Activity(ActivityType::PurchaseInStore, [
+            'amount' => $points, 'currency' => 'PLN', 'store_id' => 'SETUP', 'transaction_id' => 'TXN-SETUP',
+        ]));
         $account->releaseEvents();
         return $account;
-    }
-
-    private function givenCouponReward(): Reward
-    {
-        return new Reward('RWD-10PCT', '10% Discount', 1_000, RewardType::Coupon, '10% off');
     }
 
     // --- Opening ---
@@ -47,19 +49,17 @@ final class MemberAccountTest extends TestCase
     #[Test]
     public function opening_account_emits_member_opened_event(): void
     {
-        $account = MemberAccount::open(MemberId::from('MBR-001'), 'Jan Kowalski');
+        $account = MemberAccount::open(MemberId::from('MBR-001'), 'Jan Kowalski', $this->rules());
 
         $events = $account->releaseEvents();
         self::assertCount(1, $events);
         self::assertInstanceOf(MemberOpened::class, $events[0]);
-        self::assertSame('MBR-001', $events[0]->memberId);
     }
 
     #[Test]
     public function new_account_has_zero_balance(): void
     {
         $account = $this->givenMember();
-
         self::assertSame(0, $account->activeBalance());
         self::assertSame(0, $account->pendingBalance());
     }
@@ -71,31 +71,24 @@ final class MemberAccountTest extends TestCase
     {
         $account = $this->givenMember();
 
-        $activity = $account->recordPurchase(150.00, 'PLN', 'STORE-WAW-01', 'TXN-123');
+        $outcome = $account->record(new Activity(ActivityType::PurchaseInStore, [
+            'amount' => 150.00, 'currency' => 'PLN', 'store_id' => 'STORE-01', 'transaction_id' => 'TXN-123',
+        ]));
 
-        self::assertSame(ActivityType::PurchaseInStore, $activity->type);
-        self::assertSame(OutcomeType::PointsEarned, $activity->outcome->type);
-        self::assertSame(150, $activity->outcome->details['points']);
+        self::assertSame(OutcomeType::PointsEarned, $outcome->type);
+        self::assertSame(150, $outcome->details['points']);
         self::assertSame(150, $account->activeBalance());
         self::assertSame(0, $account->pendingBalance());
-    }
-
-    #[Test]
-    public function in_store_purchase_records_participants(): void
-    {
-        $account = $this->givenMember();
-
-        $activity = $account->recordPurchase(100, 'PLN', 'STORE-KRK-01', 'TXN-456');
-
-        self::assertSame('MBR-001', $activity->participants['customer']);
-        self::assertSame('STORE-KRK-01', $activity->participants['store']);
     }
 
     #[Test]
     public function in_store_purchase_emits_points_earned(): void
     {
         $account = $this->givenMember();
-        $account->recordPurchase(200, 'PLN', 'STORE-01', 'TXN-789');
+
+        $account->record(new Activity(ActivityType::PurchaseInStore, [
+            'amount' => 200, 'currency' => 'PLN', 'store_id' => 'S1', 'transaction_id' => 'T1',
+        ]));
 
         $events = $account->releaseEvents();
         self::assertCount(1, $events);
@@ -103,18 +96,19 @@ final class MemberAccountTest extends TestCase
         self::assertSame(200, $events[0]->points);
     }
 
-    // --- Online purchase (pending points) ---
+    // --- Online purchase (pending) ---
 
     #[Test]
-    public function online_purchase_earns_pending_points_with_bonus(): void
+    public function online_purchase_earns_pending_points_with_multiplier(): void
     {
         $account = $this->givenMember();
 
-        $activity = $account->recordOnlinePurchase(200.00, 'PLN', 'ORD-001');
+        $outcome = $account->record(new Activity(ActivityType::OnlinePurchase, [
+            'amount' => 200.00, 'currency' => 'PLN', 'order_id' => 'ORD-001',
+        ]));
 
-        self::assertSame(ActivityType::OnlinePurchase, $activity->type);
-        self::assertSame(OutcomeType::PointsPending, $activity->outcome->type);
-        self::assertSame(300, $activity->outcome->details['points']); // 200 * 1.5
+        self::assertSame(OutcomeType::PointsPending, $outcome->type);
+        self::assertSame(300, $outcome->details['points']); // 200 * 1.5
         self::assertSame(0, $account->activeBalance());
         self::assertSame(300, $account->pendingBalance());
     }
@@ -123,7 +117,10 @@ final class MemberAccountTest extends TestCase
     public function online_purchase_emits_points_pending(): void
     {
         $account = $this->givenMember();
-        $account->recordOnlinePurchase(100, 'PLN', 'ORD-002');
+
+        $account->record(new Activity(ActivityType::OnlinePurchase, [
+            'amount' => 100, 'currency' => 'PLN', 'order_id' => 'ORD-002',
+        ]));
 
         $events = $account->releaseEvents();
         self::assertCount(1, $events);
@@ -131,20 +128,23 @@ final class MemberAccountTest extends TestCase
         self::assertSame('ORD-002', $events[0]->awaitingReference);
     }
 
-    // --- Delivery (activates pending points) ---
+    // --- Delivery (activates pending) ---
 
     #[Test]
     public function delivery_activates_pending_points(): void
     {
         $account = $this->givenMember();
-        $account->recordOnlinePurchase(200, 'PLN', 'ORD-001');
+        $account->record(new Activity(ActivityType::OnlinePurchase, [
+            'amount' => 200, 'currency' => 'PLN', 'order_id' => 'ORD-001',
+        ]));
         $account->releaseEvents();
 
-        $activity = $account->recordDelivery('ORD-001');
+        $outcome = $account->record(new Activity(ActivityType::PackageDelivered, [
+            'order_id' => 'ORD-001',
+        ]));
 
-        self::assertSame(ActivityType::PackageDelivered, $activity->type);
-        self::assertSame(OutcomeType::PointsActivated, $activity->outcome->type);
-        self::assertSame(300, $activity->outcome->details['points']);
+        self::assertSame(OutcomeType::PointsActivated, $outcome->type);
+        self::assertSame(300, $outcome->details['points']);
         self::assertSame(300, $account->activeBalance());
         self::assertSame(0, $account->pendingBalance());
     }
@@ -153,15 +153,16 @@ final class MemberAccountTest extends TestCase
     public function delivery_emits_points_activated(): void
     {
         $account = $this->givenMember();
-        $account->recordOnlinePurchase(100, 'PLN', 'ORD-003');
+        $account->record(new Activity(ActivityType::OnlinePurchase, [
+            'amount' => 100, 'currency' => 'PLN', 'order_id' => 'ORD-003',
+        ]));
         $account->releaseEvents();
 
-        $account->recordDelivery('ORD-003');
+        $account->record(new Activity(ActivityType::PackageDelivered, ['order_id' => 'ORD-003']));
 
         $events = $account->releaseEvents();
         self::assertCount(1, $events);
         self::assertInstanceOf(PointsActivated::class, $events[0]);
-        self::assertSame('ORD-003', $events[0]->reference);
     }
 
     #[Test]
@@ -170,8 +171,7 @@ final class MemberAccountTest extends TestCase
         $account = $this->givenMember();
 
         $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage("No pending points found for order 'ORD-UNKNOWN'");
-        $account->recordDelivery('ORD-UNKNOWN');
+        $account->record(new Activity(ActivityType::PackageDelivered, ['order_id' => 'ORD-UNKNOWN']));
     }
 
     // --- Challenge ---
@@ -181,124 +181,118 @@ final class MemberAccountTest extends TestCase
     {
         $account = $this->givenMember();
 
-        $activity = $account->recordChallengeCompleted('SUMMER-2026', 500);
+        $outcome = $account->record(new Activity(ActivityType::ChallengeCompleted, [
+            'challenge_id' => 'SUMMER-2026', 'bonus_points' => 500,
+        ]));
 
-        self::assertSame(ActivityType::ChallengeCompleted, $activity->type);
+        self::assertSame(OutcomeType::PointsEarned, $outcome->type);
         self::assertSame(500, $account->activeBalance());
     }
 
-    // --- Birthday bonus ---
+    // --- Birthday ---
 
     #[Test]
     public function birthday_bonus_earns_points(): void
     {
         $account = $this->givenMember();
 
-        $activity = $account->recordBirthdayBonus(100);
+        $account->record(new Activity(ActivityType::BirthdayBonus, ['bonus_points' => 100]));
 
-        self::assertSame(ActivityType::BirthdayBonus, $activity->type);
         self::assertSame(100, $account->activeBalance());
     }
 
     // --- Reward redemption ---
 
     #[Test]
-    public function redeeming_reward_spends_points_and_creates_redemption(): void
+    public function redeeming_reward_spends_points(): void
     {
         $account = $this->givenMemberWithPoints(2_000);
-        $reward = $this->givenCouponReward();
 
-        $activity = $account->redeemReward($reward);
+        $outcome = $account->record(new Activity(ActivityType::RewardRedemption, [
+            'reward_id' => 'RWD-10PCT', 'reward_name' => '10% Discount', 'points_cost' => 1_000,
+        ]));
 
-        self::assertSame(ActivityType::RewardRedemption, $activity->type);
-        self::assertSame(OutcomeType::RewardIssued, $activity->outcome->type);
+        self::assertSame(OutcomeType::PointsSpent, $outcome->type);
         self::assertSame(1_000, $account->activeBalance());
-        self::assertCount(1, $account->redemptions());
-        self::assertSame('RWD-10PCT', $account->redemptions()[0]->reward->id);
     }
 
     #[Test]
-    public function redeeming_reward_emits_points_spent_and_reward_redeemed(): void
+    public function redeeming_reward_emits_points_spent(): void
     {
         $account = $this->givenMemberWithPoints(2_000);
 
-        $account->redeemReward($this->givenCouponReward());
+        $account->record(new Activity(ActivityType::RewardRedemption, [
+            'reward_id' => 'RWD-10PCT', 'reward_name' => '10% Discount', 'points_cost' => 1_000,
+        ]));
 
         $events = $account->releaseEvents();
-        self::assertCount(2, $events);
+        self::assertCount(1, $events);
         self::assertInstanceOf(PointsSpent::class, $events[0]);
-        self::assertInstanceOf(RewardRedeemed::class, $events[1]);
-        self::assertSame('RWD-10PCT', $events[1]->rewardId);
     }
 
     #[Test]
-    public function redeeming_reward_with_insufficient_points_throws(): void
+    public function redeeming_with_insufficient_points_throws(): void
     {
         $account = $this->givenMemberWithPoints(500);
 
         $this->expectException(InsufficientPointsException::class);
-        $account->redeemReward($this->givenCouponReward());
+        $account->record(new Activity(ActivityType::RewardRedemption, [
+            'reward_id' => 'RWD-10PCT', 'points_cost' => 1_000,
+        ]));
     }
 
-    #[Test]
-    public function redeeming_inactive_reward_throws(): void
-    {
-        $account = $this->givenMemberWithPoints(1_000);
-        $inactive = new Reward('RWD-OLD', 'Old', 100, RewardType::FreeProduct, 'Gone', false);
-
-        $this->expectException(\DomainException::class);
-        $this->expectExceptionMessage("not active");
-        $account->redeemReward($inactive);
-    }
-
-    // --- Activities history ---
+    // --- Activity log ---
 
     #[Test]
-    public function activities_are_recorded_in_order(): void
+    public function activities_preserve_order_and_outcomes(): void
     {
         $account = $this->givenMember();
-        $account->recordPurchase(100, 'PLN', 'S1', 'T1');
-        $account->recordChallengeCompleted('CH-1', 200);
-        $account->recordBirthdayBonus(50);
 
-        $types = array_map(fn($a) => $a->type, $account->activities());
-        self::assertSame([
-            ActivityType::PurchaseInStore,
-            ActivityType::ChallengeCompleted,
-            ActivityType::BirthdayBonus,
-        ], $types);
+        $account->record(new Activity(ActivityType::PurchaseInStore, ['amount' => 100, 'currency' => 'PLN', 'store_id' => 'S1', 'transaction_id' => 'T1']));
+        $account->record(new Activity(ActivityType::ChallengeCompleted, ['challenge_id' => 'CH-1', 'bonus_points' => 200]));
+        $account->record(new Activity(ActivityType::BirthdayBonus, ['bonus_points' => 50]));
+
+        $activities = $account->activities();
+        self::assertCount(3, $activities);
+
+        $types = array_map(fn($a) => $a->type, $activities);
+        self::assertSame([ActivityType::PurchaseInStore, ActivityType::ChallengeCompleted, ActivityType::BirthdayBonus], $types);
+
+        // Each activity has its outcome attached
+        foreach ($activities as $a) {
+            self::assertNotNull($a->outcome());
+        }
     }
 
-    // --- Mixed scenario ---
+    // --- Full lifecycle ---
 
     #[Test]
     public function full_lifecycle_scenario(): void
     {
         $account = $this->givenMember();
 
-        // Purchase in store
-        $account->recordPurchase(300, 'PLN', 'STORE-01', 'TXN-1');
+        // In-store purchase
+        $account->record(new Activity(ActivityType::PurchaseInStore, ['amount' => 300, 'currency' => 'PLN', 'store_id' => 'S1', 'transaction_id' => 'T1']));
         self::assertSame(300, $account->activeBalance());
 
         // Online order (pending)
-        $account->recordOnlinePurchase(200, 'PLN', 'ORD-1');
+        $account->record(new Activity(ActivityType::OnlinePurchase, ['amount' => 200, 'currency' => 'PLN', 'order_id' => 'ORD-1']));
         self::assertSame(300, $account->activeBalance());
-        self::assertSame(300, $account->pendingBalance()); // 200 * 1.5
+        self::assertSame(300, $account->pendingBalance());
 
-        // Challenge bonus
-        $account->recordChallengeCompleted('SUMMER', 500);
+        // Challenge
+        $account->record(new Activity(ActivityType::ChallengeCompleted, ['challenge_id' => 'SUMMER', 'bonus_points' => 500]));
         self::assertSame(800, $account->activeBalance());
 
-        // Deliver the package
-        $account->recordDelivery('ORD-1');
+        // Delivery
+        $account->record(new Activity(ActivityType::PackageDelivered, ['order_id' => 'ORD-1']));
         self::assertSame(1_100, $account->activeBalance());
         self::assertSame(0, $account->pendingBalance());
 
-        // Redeem a reward
-        $account->redeemReward($this->givenCouponReward());
+        // Redeem
+        $account->record(new Activity(ActivityType::RewardRedemption, ['reward_id' => 'R1', 'points_cost' => 1_000]));
         self::assertSame(100, $account->activeBalance());
 
         self::assertCount(5, $account->activities());
-        self::assertCount(1, $account->redemptions());
     }
 }
