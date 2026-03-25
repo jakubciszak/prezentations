@@ -37,6 +37,12 @@ final class Activity
             ?? throw new \InvalidArgumentException("Missing subject key: '{$key}'");
     }
 
+    /** @return array<string, mixed> */
+    public function data(): array
+    {
+        return $this->subject;
+    }
+
     public function has(string $key): bool
     {
         return array_key_exists($key, $this->subject);

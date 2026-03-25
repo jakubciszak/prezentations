@@ -4,28 +4,22 @@ declare(strict_types=1);
 
 namespace App\MembershipActivity\Domain;
 
+use App\MembershipActivity\Event\ActivityCompleted;
+use App\MembershipActivity\Event\ActivityInitialized;
 use App\MembershipActivity\Event\MemberEvent;
 use App\MembershipActivity\Event\MemberOpened;
-use App\MembershipActivity\Event\PointsActivated;
-use App\MembershipActivity\Event\PointsEarned;
-use App\MembershipActivity\Event\PointsPending;
-use App\MembershipActivity\Event\PointsSpent;
 
 /**
  * MemberAccount — thin aggregate for a loyalty program member.
  *
- * Responsible for:
- * - recording activities (bare facts)
- * - completing activities with outcomes (from external adapters)
- * - emitting domain events
+ * Emits generic lifecycle events:
+ * - MemberOpened         — account created
+ * - ActivityInitialized  — activity recorded (type + input payload)
+ * - ActivityCompleted    — activity processed (type + outcome payload)
  *
- * NOT responsible for:
- * - points ledger / wallet management (→ Points context, via WalletFacade)
- * - points calculation (→ Points context, via PointsFacade)
- * - reward catalog (→ Rewards context, via RewardsFacade)
- *
- * Balance queries go through WalletFacade directly — this aggregate
- * does NOT own or expose balance state.
+ * NO knowledge of points, rewards, or any other bounded context.
+ * Downstream contexts subscribe to ActivityCompleted and interpret
+ * the outcomeType + outcomePayload as they see fit.
  */
 final class MemberAccount
 {
@@ -49,25 +43,36 @@ final class MemberAccount
     }
 
     /**
-     * Record an activity — just stores the fact, no business logic.
+     * Record an activity and emit ActivityInitialized.
      */
     public function record(Activity $activity): void
     {
         $this->activities[] = $activity;
+
+        $this->recordEvent(new ActivityInitialized(
+            memberId: $this->id->value,
+            activityId: $activity->id->value,
+            activityType: $activity->type->value,
+            payload: $activity->data(),
+        ));
     }
 
     /**
      * Handle an outcome produced by an external adapter.
-     * Completes the activity and emits domain events.
-     *
-     * The ledger has already been updated by the adapter (via WalletFacade).
-     * Balance info is carried in the Outcome payload.
+     * Completes the activity and emits ActivityCompleted.
      */
     public function handleOutcome(string $activityId, Outcome $outcome): Outcome
     {
         $activity = $this->findActivity($activityId);
         $activity->complete($outcome);
-        $this->emitEventsFor($activity, $outcome);
+
+        $this->recordEvent(new ActivityCompleted(
+            memberId: $this->id->value,
+            activityId: $activity->id->value,
+            activityType: $activity->type->value,
+            outcomeType: $outcome->type->value,
+            outcomePayload: $outcome->payload,
+        ));
 
         return $outcome;
     }
@@ -99,43 +104,6 @@ final class MemberAccount
         }
 
         throw new \DomainException("Activity not found: {$activityId}");
-    }
-
-    private function emitEventsFor(Activity $activity, Outcome $outcome): void
-    {
-        match ($outcome->type) {
-            OutcomeType::PointsEarned => $this->recordEvent(new PointsEarned(
-                memberId: $this->id->value,
-                activityId: $activity->id->value,
-                points: $outcome->payload['points'],
-                balance: $outcome->payload['active_balance'],
-                description: $activity->type->value,
-            )),
-
-            OutcomeType::PointsPending => $this->recordEvent(new PointsPending(
-                memberId: $this->id->value,
-                activityId: $activity->id->value,
-                points: $outcome->payload['points'],
-                awaitingReference: $outcome->payload['reference'],
-                description: $activity->type->value,
-            )),
-
-            OutcomeType::PointsActivated => $this->recordEvent(new PointsActivated(
-                memberId: $this->id->value,
-                activityId: $activity->id->value,
-                points: $outcome->payload['points'],
-                reference: $outcome->payload['reference'],
-                activeBalance: $outcome->payload['active_balance'],
-            )),
-
-            OutcomeType::PointsSpent, OutcomeType::RewardIssued => $this->recordEvent(new PointsSpent(
-                memberId: $this->id->value,
-                activityId: $activity->id->value,
-                points: $outcome->payload['points'] ?? $outcome->payload['points_spent'],
-                balance: $outcome->payload['active_balance'],
-                description: $activity->type->value,
-            )),
-        };
     }
 
     private function recordEvent(MemberEvent $event): void

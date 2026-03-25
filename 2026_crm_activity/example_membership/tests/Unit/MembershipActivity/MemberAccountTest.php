@@ -15,11 +15,9 @@ use App\MembershipActivity\Domain\ActivityType;
 use App\MembershipActivity\Domain\MemberAccount;
 use App\MembershipActivity\Domain\MemberId;
 use App\MembershipActivity\Domain\OutcomeType;
+use App\MembershipActivity\Event\ActivityCompleted;
+use App\MembershipActivity\Event\ActivityInitialized;
 use App\MembershipActivity\Event\MemberOpened;
-use App\MembershipActivity\Event\PointsActivated;
-use App\MembershipActivity\Event\PointsEarned;
-use App\MembershipActivity\Event\PointsPending;
-use App\MembershipActivity\Event\PointsSpent;
 use App\Points\Api\WalletFacade;
 use App\Points\Application\DefaultPointsFacade;
 use App\Points\Application\DefaultWalletService;
@@ -105,7 +103,22 @@ final class MemberAccountTest extends TestCase
         self::assertSame(0, $this->activeBalance());
     }
 
-    // --- Record + adapter flow ---
+    // --- Record emits ActivityInitialized ---
+
+    #[Test]
+    public function recording_activity_emits_activity_initialized(): void
+    {
+        $account = $this->givenMember();
+        $activity = new Activity(ActivityType::PurchaseInStore, ['amount' => 500, 'transaction_id' => 'T1']);
+
+        $account->record($activity);
+
+        $events = $account->releaseEvents();
+        self::assertCount(1, $events);
+        self::assertInstanceOf(ActivityInitialized::class, $events[0]);
+        self::assertSame('purchase_in_store', $events[0]->activityType);
+        self::assertSame(500, $events[0]->payload['amount']);
+    }
 
     #[Test]
     public function recording_activity_does_not_change_balance(): void
@@ -117,13 +130,17 @@ final class MemberAccountTest extends TestCase
         self::assertSame(ActivityStatus::Recorded, $account->activities()[0]->status());
     }
 
+    // --- Handling outcome emits ActivityCompleted ---
+
     #[Test]
-    public function handling_outcome_completes_activity_and_updates_wallet(): void
+    public function handling_outcome_emits_activity_completed(): void
     {
         $account = $this->givenMember();
         $activity = new Activity(ActivityType::PurchaseInStore, ['amount' => 150, 'transaction_id' => 'T1']);
 
         $account->record($activity);
+        $account->releaseEvents(); // clear ActivityInitialized
+
         $outcome = $this->router->dispatch($activity, $account->id->value);
         $result = $account->handleOutcome($activity->id->value, $outcome);
 
@@ -131,6 +148,13 @@ final class MemberAccountTest extends TestCase
         self::assertSame(150, $result->payload['points']);
         self::assertSame(150, $this->activeBalance());
         self::assertTrue($activity->isCompleted());
+
+        $events = $account->releaseEvents();
+        self::assertCount(1, $events);
+        self::assertInstanceOf(ActivityCompleted::class, $events[0]);
+        self::assertSame('purchase_in_store', $events[0]->activityType);
+        self::assertSame('points_earned', $events[0]->outcomeType);
+        self::assertSame(150, $events[0]->outcomePayload['points']);
     }
 
     // --- In-store purchase ---
@@ -147,7 +171,7 @@ final class MemberAccountTest extends TestCase
     }
 
     #[Test]
-    public function in_store_purchase_emits_points_earned(): void
+    public function in_store_purchase_emits_completed_with_points_earned(): void
     {
         $account = $this->givenMember();
         $this->process($account, new Activity(ActivityType::PurchaseInStore, [
@@ -155,9 +179,10 @@ final class MemberAccountTest extends TestCase
         ]));
 
         $events = $account->releaseEvents();
-        self::assertCount(1, $events);
-        self::assertInstanceOf(PointsEarned::class, $events[0]);
-        self::assertSame(200, $events[0]->points);
+        $completed = array_values(array_filter($events, fn($e) => $e instanceof ActivityCompleted));
+        self::assertCount(1, $completed);
+        self::assertSame('points_earned', $completed[0]->outcomeType);
+        self::assertSame(200, $completed[0]->outcomePayload['points']);
     }
 
     // --- Online purchase (pending) ---
@@ -175,7 +200,7 @@ final class MemberAccountTest extends TestCase
     }
 
     #[Test]
-    public function online_purchase_emits_points_pending(): void
+    public function online_purchase_emits_completed_with_points_pending(): void
     {
         $account = $this->givenMember();
         $this->process($account, new Activity(ActivityType::OnlinePurchase, [
@@ -183,9 +208,10 @@ final class MemberAccountTest extends TestCase
         ]));
 
         $events = $account->releaseEvents();
-        self::assertCount(1, $events);
-        self::assertInstanceOf(PointsPending::class, $events[0]);
-        self::assertSame('ORD-002', $events[0]->awaitingReference);
+        $completed = array_values(array_filter($events, fn($e) => $e instanceof ActivityCompleted));
+        self::assertCount(1, $completed);
+        self::assertSame('points_pending', $completed[0]->outcomeType);
+        self::assertSame('ORD-002', $completed[0]->outcomePayload['reference']);
     }
 
     // --- Delivery (activates pending) ---
@@ -207,7 +233,7 @@ final class MemberAccountTest extends TestCase
     }
 
     #[Test]
-    public function delivery_emits_points_activated(): void
+    public function delivery_emits_completed_with_points_activated(): void
     {
         $account = $this->givenMember();
         $this->process($account, new Activity(ActivityType::OnlinePurchase, [
@@ -220,8 +246,9 @@ final class MemberAccountTest extends TestCase
         ]));
 
         $events = $account->releaseEvents();
-        self::assertCount(1, $events);
-        self::assertInstanceOf(PointsActivated::class, $events[0]);
+        $completed = array_values(array_filter($events, fn($e) => $e instanceof ActivityCompleted));
+        self::assertCount(1, $completed);
+        self::assertSame('points_activated', $completed[0]->outcomeType);
     }
 
     #[Test]
@@ -276,7 +303,7 @@ final class MemberAccountTest extends TestCase
     }
 
     #[Test]
-    public function redeeming_reward_emits_points_spent(): void
+    public function redeeming_reward_emits_completed_with_reward_issued(): void
     {
         $account = $this->givenMemberWithPoints(2_000);
 
@@ -285,8 +312,10 @@ final class MemberAccountTest extends TestCase
         ]));
 
         $events = $account->releaseEvents();
-        self::assertCount(1, $events);
-        self::assertInstanceOf(PointsSpent::class, $events[0]);
+        $completed = array_values(array_filter($events, fn($e) => $e instanceof ActivityCompleted));
+        self::assertCount(1, $completed);
+        self::assertSame('reward_issued', $completed[0]->outcomeType);
+        self::assertSame('RWD-10PCT', $completed[0]->outcomePayload['reward_id']);
     }
 
     #[Test]
@@ -318,6 +347,22 @@ final class MemberAccountTest extends TestCase
         }
     }
 
+    // --- Event lifecycle: each process emits Initialized + Completed ---
+
+    #[Test]
+    public function each_activity_emits_initialized_and_completed(): void
+    {
+        $account = $this->givenMember();
+        $this->process($account, new Activity(ActivityType::PurchaseInStore, [
+            'amount' => 100, 'transaction_id' => 'T1',
+        ]));
+
+        $events = $account->releaseEvents();
+        self::assertCount(2, $events);
+        self::assertInstanceOf(ActivityInitialized::class, $events[0]);
+        self::assertInstanceOf(ActivityCompleted::class, $events[1]);
+    }
+
     // --- Full lifecycle ---
 
     #[Test]
@@ -343,5 +388,14 @@ final class MemberAccountTest extends TestCase
         self::assertSame(100, $this->activeBalance());
 
         self::assertCount(5, $account->activities());
+
+        // 5 activities × 2 events each = 10 total events
+        $events = $account->releaseEvents();
+        self::assertCount(10, $events);
+
+        $initialized = array_filter($events, fn($e) => $e instanceof ActivityInitialized);
+        $completed = array_filter($events, fn($e) => $e instanceof ActivityCompleted);
+        self::assertCount(5, $initialized);
+        self::assertCount(5, $completed);
     }
 }

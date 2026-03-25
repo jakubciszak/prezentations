@@ -6,16 +6,19 @@ namespace App\MembershipActivity\Event;
 
 use DateTimeImmutable;
 
-final readonly class PointsActivated implements MemberEvent
+/**
+ * An activity processing has failed.
+ */
+final readonly class ActivityFailed implements MemberEvent
 {
     public DateTimeImmutable $occurredAt;
 
     public function __construct(
         public string $memberId,
         public string $activityId,
-        public int $points,
-        public string $reference,
-        public int $activeBalance,
+        public string $activityType,
+        public string $reason,
+        public array $payload,
     ) {
         $this->occurredAt = new DateTimeImmutable();
     }
