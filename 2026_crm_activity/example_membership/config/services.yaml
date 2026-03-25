@@ -1,0 +1,42 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: true
+
+    # === MembershipActivity context ===
+
+    App\MembershipActivity\Application\Flow\FlowRegistry:
+        factory: ['App\MembershipActivity\Application\Flow\MembershipFlows', 'standard']
+
+    App\MembershipActivity\Domain\MemberAccountRepository:
+        class: App\MembershipActivity\Infrastructure\InMemoryMemberAccountRepository
+
+    App\MembershipActivity\Application\Adapter\PointsActivityAdapter: ~
+    App\MembershipActivity\Application\Adapter\PointsActivationAdapter: ~
+    App\MembershipActivity\Application\Adapter\RewardsActivityAdapter: ~
+
+    App\MembershipActivity\Application\ServiceRouter:
+        arguments:
+            $adapters:
+                points_calculation: '@App\MembershipActivity\Application\Adapter\PointsActivityAdapter'
+                points_activation: '@App\MembershipActivity\Application\Adapter\PointsActivationAdapter'
+                reward_service: '@App\MembershipActivity\Application\Adapter\RewardsActivityAdapter'
+
+    App\MembershipActivity\Handler\EventLogger: ~
+
+    # === Points context ===
+
+    App\Points\Api\PointsFacade:
+        class: App\Points\Application\DefaultPointsFacade
+
+    App\Points\Api\WalletFacade:
+        class: App\Points\Application\DefaultWalletService
+
+    # === Rewards context ===
+
+    App\Rewards\Api\RewardsFacade:
+        class: App\Rewards\Application\DefaultRewardsFacade
+
+    App\Rewards\Domain\RewardCatalog:
+        class: App\Rewards\Infrastructure\InMemoryRewardCatalog

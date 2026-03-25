@@ -1,0 +1,7 @@
+default:
+    suites:
+        membership:
+            paths:
+                - '%paths.base%/features/membership'
+            contexts:
+                - Features\Bootstrap\MembershipContext
